@@ -1293,6 +1293,7 @@ class Player {
 class InputController {
   constructor(canvas, game) {
     this.canvas = canvas;
+    this.inputTarget = canvas.parentElement || canvas;
     this.game = game;
     this.activePointerId = null;
     this.isPointerDown = false;
@@ -1308,12 +1309,16 @@ class InputController {
   }
 
   bindEvents() {
-    this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
-    this.canvas.addEventListener("selectstart", (event) => event.preventDefault());
-    this.canvas.addEventListener("pointerdown", (event) => this.onPointerDown(event));
-    this.canvas.addEventListener("pointerup", (event) => this.onPointerUp(event));
-    this.canvas.addEventListener("pointercancel", (event) => this.onPointerCancel(event));
-    this.canvas.addEventListener("lostpointercapture", (event) => this.onPointerCancel(event));
+    const blockNativeTouch = (event) => event.preventDefault();
+    this.inputTarget.addEventListener("contextmenu", blockNativeTouch);
+    this.inputTarget.addEventListener("selectstart", blockNativeTouch);
+    this.inputTarget.addEventListener("touchstart", blockNativeTouch, { passive: false });
+    this.inputTarget.addEventListener("touchmove", blockNativeTouch, { passive: false });
+    this.inputTarget.addEventListener("touchend", blockNativeTouch, { passive: false });
+    this.inputTarget.addEventListener("pointerdown", (event) => this.onPointerDown(event));
+    this.inputTarget.addEventListener("pointerup", (event) => this.onPointerUp(event));
+    this.inputTarget.addEventListener("pointercancel", (event) => this.onPointerCancel(event));
+    this.inputTarget.addEventListener("lostpointercapture", (event) => this.onPointerCancel(event));
     window.addEventListener("blur", () => this.cancelActiveInput());
   }
 
@@ -1328,7 +1333,9 @@ class InputController {
     }
     this.activePointerId = event.pointerId;
     this.isPointerDown = true;
-    this.canvas.setPointerCapture(event.pointerId);
+    if (this.inputTarget.setPointerCapture) {
+      this.inputTarget.setPointerCapture(event.pointerId);
+    }
     this.game.handlePressStart();
   }
 
@@ -1359,8 +1366,8 @@ class InputController {
   }
 
   releasePointer(pointerId) {
-    if (this.canvas.hasPointerCapture(pointerId)) {
-      this.canvas.releasePointerCapture(pointerId);
+    if (this.inputTarget.hasPointerCapture && this.inputTarget.hasPointerCapture(pointerId)) {
+      this.inputTarget.releasePointerCapture(pointerId);
     }
     this.activePointerId = null;
     this.isPointerDown = false;

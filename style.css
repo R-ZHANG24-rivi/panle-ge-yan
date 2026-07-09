@@ -43,6 +43,9 @@ body {
     env(safe-area-inset-left);
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent !important;
+  touch-action: none;
+  cursor: default;
+  outline: none !important;
 }
 
 #gameCanvas {
@@ -57,6 +60,7 @@ body {
   );
   background: #eaf8fc;
   touch-action: none;
+  pointer-events: none;
   cursor: default;
   user-select: none;
   -webkit-user-select: none;
@@ -66,6 +70,8 @@ body {
   outline: none !important;
 }
 
+.game-shell:focus,
+.game-shell:active,
 #gameCanvas:focus,
 #gameCanvas:active {
   outline: none !important;
