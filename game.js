@@ -222,6 +222,11 @@ const UI_ICON_FILES = {
   share: "assets/ui/icon-share.png"
 };
 
+const AUDIO_FILES = {
+  bgm: "assets/audio/bgm1.mp3",
+  grabSuccess: "assets/audio/grab-success.ogg"
+};
+
 const DEFAULT_OUTFIT = {
   hair: "hair_01",
   accessory: "none",
@@ -1374,6 +1379,76 @@ class InputController {
   }
 }
 
+class GameAudio {
+  constructor(files) {
+    this.files = files;
+    this.enabled = true;
+    this.unlocked = false;
+    this.bgm = this.createAudio(files.bgm, {
+      loop: true,
+      volume: 0.32,
+      preload: "auto"
+    });
+    this.grabSuccess = this.createAudio(files.grabSuccess, {
+      loop: false,
+      volume: 0.72,
+      preload: "auto"
+    });
+  }
+
+  createAudio(src, options = {}) {
+    const audio = new Audio(src);
+    audio.loop = Boolean(options.loop);
+    audio.volume = options.volume ?? 1;
+    audio.preload = options.preload || "auto";
+    audio.playsInline = true;
+    return audio;
+  }
+
+  unlock() {
+    if (this.unlocked || !this.enabled) {
+      return;
+    }
+    this.unlocked = true;
+    this.playBgm();
+  }
+
+  setMuted(muted) {
+    this.enabled = !muted;
+    this.bgm.muted = muted;
+    this.grabSuccess.muted = muted;
+    if (muted) {
+      this.bgm.pause();
+      return;
+    }
+    this.unlock();
+    this.playBgm();
+  }
+
+  playBgm() {
+    if (!this.enabled) {
+      return;
+    }
+    const playPromise = this.bgm.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch(() => {});
+    }
+  }
+
+  playGrabSuccess() {
+    if (!this.enabled || !this.unlocked) {
+      return;
+    }
+    try {
+      this.grabSuccess.currentTime = 0;
+      const playPromise = this.grabSuccess.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise.catch(() => {});
+      }
+    } catch (error) {}
+  }
+}
+
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1386,6 +1461,7 @@ class Game {
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
     this.outfitAssetCache = new Map();
     this.uiIconAssets = this.loadUiIconAssets();
+    this.audio = new GameAudio(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
     this.selectedOutfitPart = "hair";
@@ -1672,6 +1748,7 @@ class Game {
   }
 
   handlePressStart() {
+    this.audio.unlock();
     if (this.state === STATE.START) {
       return;
     }
@@ -1690,6 +1767,7 @@ class Game {
   }
 
   handleUiPointer(point) {
+    this.audio.unlock();
     if (this.uiPanel) {
       if (this.uiPanel.closeRect && this.pointInRect(point, this.uiPanel.closeRect)) {
         this.uiPanel = null;
@@ -1751,6 +1829,7 @@ class Game {
     }
     if (id === "sound") {
       this.soundMuted = !this.soundMuted;
+      this.audio.setMuted(this.soundMuted);
       this.showToast(this.soundMuted ? "声音已关闭" : "声音已开启");
       return;
     }
@@ -1983,6 +2062,7 @@ class Game {
     }
     this.pendingAttempt.scoreConfirmed = true;
     this.applyAccuracyScore(this.animationResult || this.pendingAttempt);
+    this.audio.playGrabSuccess();
     const grabbedPowerUp = this.targetHold.powerUp;
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
