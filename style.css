@@ -29,7 +29,7 @@ body {
   height: 100svh;
   height: var(--app-height, 100dvh);
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   background:
     linear-gradient(145deg, #eefbff 0%, #d5f0f7 48%, #9fddeb 100%);
@@ -50,8 +50,10 @@ body {
 
 #gameCanvas {
   display: block;
-  width: 100%;
-  height: 100%;
+  width: auto;
+  height: min(100%, calc(100vw * 812 / 375));
+  max-width: 100%;
+  aspect-ratio: 375 / 812;
   background: #eaf8fc;
   touch-action: none;
   pointer-events: none;

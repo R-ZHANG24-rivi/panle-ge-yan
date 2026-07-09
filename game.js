@@ -215,6 +215,7 @@ const PLAYER_ASSET_FILES = {
 
 const UI_ICON_FILES = {
   back: "assets/ui/icon-back.png",
+  skin: "assets/ui/icon-skin.png?v=20260709-ring-1",
   restart: "assets/ui/icon-restart.png",
   rank: "assets/ui/icon-rank.png",
   soundOn: "assets/ui/icon-sound-on.png",
@@ -223,7 +224,7 @@ const UI_ICON_FILES = {
 };
 
 const AUDIO_FILES = {
-  bgm: "assets/audio/bgm1.mp3",
+  bgm: "assets/audio/bgm1.mp3?v=20260710-grip-glide",
   grabSuccess: "assets/audio/grab-success.ogg"
 };
 
@@ -1386,7 +1387,7 @@ class GameAudio {
     this.unlocked = false;
     this.bgm = this.createAudio(files.bgm, {
       loop: true,
-      volume: 0.32,
+      volume: 0.256,
       preload: "auto"
     });
     this.grabSuccess = this.createAudio(files.grabSuccess, {
@@ -1837,7 +1838,7 @@ class Game {
       this.shareGame();
       return;
     }
-    if (id === "shop") {
+    if (id === "skin" || id === "shop") {
       this.selectedOutfitPart = "hair";
       this.uiPanel = { type: "outfit" };
       return;
@@ -1850,8 +1851,18 @@ class Game {
       return;
     }
     if (id.startsWith("outfit-option-")) {
-      const optionId = id.replace("outfit-option-", "");
-      this.setOutfitOption(this.selectedOutfitPart, optionId);
+      const payload = id.replace("outfit-option-", "");
+      const divider = payload.indexOf(":");
+      if (divider >= 0) {
+        const part = payload.slice(0, divider);
+        const optionId = payload.slice(divider + 1);
+        if (OUTFIT_OPTIONS[part]) {
+          this.selectedOutfitPart = part;
+          this.setOutfitOption(part, optionId);
+        }
+      } else {
+        this.setOutfitOption(this.selectedOutfitPart, payload);
+      }
       return;
     }
     if (id === "outfit-close") {
@@ -3911,21 +3922,22 @@ class Game {
   }
 
   drawHud(ctx) {
+    const hudY = 22;
     const h = 126;
     ctx.fillStyle = "rgba(108, 203, 222, 0.42)";
-    ctx.fillRect(0, 0, CONFIG.logicalWidth, h);
+    ctx.fillRect(0, hudY, CONFIG.logicalWidth, h);
 
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
     ctx.font = "bold 15px Arial, Helvetica, sans-serif";
-    ctx.fillText("得分", 30, 66);
-    ctx.fillText(`${this.score}`, 72, 66);
-    ctx.fillText(`连击 x${this.preciseCombo}`, 116, 66);
-    this.drawPowerUpStatus(ctx);
+    ctx.fillText("得分", 30, hudY + 66);
+    ctx.fillText(`${this.score}`, 72, hudY + 66);
+    ctx.fillText(`连击 x${this.preciseCombo}`, 116, hudY + 66);
+    this.drawPowerUpStatus(ctx, hudY);
 
     const scoreBarX = 30;
-    const scoreBarY = 78;
+    const scoreBarY = hudY + 78;
     const scoreBarW = 142;
     const scoreBarH = 8;
     const scoreProgress = Math.min(1, (this.score % 1000) / 1000);
@@ -3940,17 +3952,17 @@ class Game {
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
     ctx.font = "bold 15px Arial, Helvetica, sans-serif";
-    ctx.fillText("当前高度", 30, 98);
-    ctx.fillText("最高纪录：", 196, 98);
+    ctx.fillText("当前高度", 30, hudY + 98);
+    ctx.fillText("最高纪录：", 196, hudY + 98);
 
     ctx.font = "bold 18px Arial, Helvetica, sans-serif";
-    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 102, 98);
-    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 286, 98);
+    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 102, hudY + 98);
+    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 286, hudY + 98);
 
     this.drawChargeBar(ctx);
   }
 
-  drawPowerUpStatus(ctx) {
+  drawPowerUpStatus(ctx, yOffset = 0) {
     const active = [];
     if (this.powerUps.magnet > 0) {
       active.push(["magnet", this.powerUps.magnet]);
@@ -3962,7 +3974,7 @@ class Game {
       return;
     }
     let x = 30;
-    const y = 38;
+    const y = yOffset + 38;
     ctx.save();
     ctx.textBaseline = "middle";
     ctx.font = "bold 11px Arial, Helvetica, sans-serif";
@@ -4149,7 +4161,7 @@ class Game {
 
   drawUiControls(ctx) {
     const size = 40;
-    const gap = 10;
+    const gap = 9;
     const y = 32;
     const buttons = this.state === STATE.START
       ? [
@@ -4158,7 +4170,7 @@ class Game {
           { id: "share", x: CONFIG.logicalWidth - 24 - size, y }
         ]
       : (() => {
-          const ids = ["restart", "rank", "sound", "share"];
+          const ids = ["skin", "restart", "rank", "sound", "share"];
           const marginRight = 24;
           const totalW = ids.length * size + (ids.length - 1) * gap;
           let x = CONFIG.logicalWidth - marginRight - totalW;
@@ -4253,6 +4265,16 @@ class Game {
       ctx.beginPath();
       ctx.moveTo(cx - 14, cy + 14);
       ctx.lineTo(cx + 14, cy + 14);
+      ctx.stroke();
+    } else if (id === "skin" || id === "shop") {
+      ctx.lineWidth = 3.6;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, cy - 5);
+      ctx.quadraticCurveTo(cx - 4, cy - 13, cx, cy - 6);
+      ctx.quadraticCurveTo(cx + 4, cy - 13, cx + 10, cy - 5);
+      ctx.lineTo(cx + 8, cy + 12);
+      ctx.lineTo(cx - 8, cy + 12);
+      ctx.closePath();
       ctx.stroke();
     } else if (id === "sound") {
       if (this.soundMuted) {
@@ -4400,55 +4422,143 @@ class Game {
   }
 
   drawOutfitPanel(ctx) {
-    const x = 0;
-    const y = 92;
-    const w = CONFIG.logicalWidth;
-    const h = CONFIG.logicalHeight - 92;
+    const x = 31;
+    const y = 158;
+    const w = 314;
+    const h = 496;
+    const leftW = 174;
+    const optionX = x + 186;
+    const secondOptionX = x + 250;
     this.uiPanel.bounds = { x, y, w, h };
-    this.uiPanel.closeRect = { x: 23, y: y + 18, w: 42, h: 42 };
-    this.uiPanel.buttons = [{ id: "outfit-close", x: CONFIG.logicalWidth - 76, y: y + 16, w: 62, h: 44 }];
+    this.uiPanel.closeRect = { x: x + 9, y: y + 7, w: 40, h: 40 };
+    this.uiPanel.buttons = [{ id: "outfit-close", ...this.uiPanel.closeRect }];
 
     ctx.save();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.fillStyle = "rgba(37, 81, 99, 0.28)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-    ctx.fillStyle = "#f9d8df";
-    ctx.fillRect(0, y + 76, CONFIG.logicalWidth, 250);
-    ctx.strokeStyle = "rgba(0,0,0,0.08)";
-    ctx.lineWidth = 1;
+
+    ctx.shadowColor = "rgba(63, 112, 132, 0.20)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = "rgba(250, 253, 254, 0.98)";
+    this.roundRect(ctx, x, y, w, h, 18);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
     ctx.beginPath();
-    ctx.moveTo(0, y + 76);
-    ctx.lineTo(CONFIG.logicalWidth, y + 76);
-    ctx.moveTo(0, y + 326);
-    ctx.lineTo(CONFIG.logicalWidth, y + 326);
-    ctx.stroke();
+    this.roundRect(ctx, x, y, leftW, h, 18);
+    ctx.clip();
+    ctx.fillStyle = "#f8dce5";
+    ctx.fillRect(x, y, leftW, h);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.42)";
+    [17, 49, 81, 113, 145].forEach((offset) => {
+      this.roundRect(ctx, x + offset, y, 11, h, 5.5);
+      ctx.fill();
+    });
     ctx.restore();
 
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "#9fa6aa";
-    ctx.font = "bold 21px Arial, Helvetica, sans-serif";
-    ctx.fillText("修改虚拟头像", CONFIG.logicalWidth / 2, y + 38);
-    ctx.fillStyle = "#12a9df";
-    ctx.font = "bold 18px Arial, Helvetica, sans-serif";
-    ctx.fillText("完成", CONFIG.logicalWidth - 44, y + 38);
-    ctx.strokeStyle = "#a9aeb1";
-    ctx.lineWidth = 3.4;
-    ctx.lineCap = "round";
-    const close = this.uiPanel.closeRect;
-    ctx.beginPath();
-    ctx.moveTo(close.x + 8, close.y + 8);
-    ctx.lineTo(close.x + close.w - 8, close.y + close.h - 8);
-    ctx.moveTo(close.x + close.w - 8, close.y + 8);
-    ctx.lineTo(close.x + 8, close.y + close.h - 8);
-    ctx.stroke();
+    ctx.fillStyle = "#5f6c72";
+    ctx.font = "bold 16px Arial, Helvetica, sans-serif";
+    ctx.fillText("试衣间", x + 92, y + 27);
     ctx.restore();
 
-    this.drawOutfitPreview(ctx, CONFIG.logicalWidth / 2, y + 214);
-    this.drawOutfitPartTabs(ctx, y + 350);
-    this.drawOutfitOptions(ctx, y + 430);
+    this.drawOutfitShopBackButton(ctx, x + 9, y + 7);
+    this.drawOutfitShopPreview(ctx, x + 88, y + 330);
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(141, 177, 190, 0.34)";
+    ctx.lineWidth = 1;
+    [104, 196, 288, 380].forEach((offset) => {
+      ctx.beginPath();
+      ctx.moveTo(x + 175, y + offset);
+      ctx.lineTo(x + w - 1, y + offset);
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    const sections = [
+      { part: "hair", label: "发型", y: y + 20, options: ["hair_female", "hair_male"] },
+      { part: "shirt", label: "上装", y: y + 113, options: ["shirt_01", "shirt_male"] },
+      { part: "pants", label: "下装", y: y + 205, options: ["pants_blue", "pants_brown"] },
+      { part: "chalkBag", label: "镁粉袋", y: y + 297, options: ["chalk_01", "chalk_02"] },
+      { part: "accessory", label: "配饰", y: y + 391, options: ["none", "glasses_01"], note: "敬请期待..." }
+    ];
+
+    sections.forEach((section) => {
+      this.drawOutfitShopSection(ctx, section, optionX, secondOptionX);
+    });
   }
 
+  drawOutfitShopBackButton(ctx, x, y) {
+    const size = 40;
+    this.uiPanel.buttons.push({ id: "outfit-close", x, y, w: size, h: size });
+    if (this.drawUiIconImage(ctx, "back", x, y, size)) {
+      return;
+    }
+    ctx.save();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#d3f6fc";
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, size / 2 - 5, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawUiIcon(ctx, "back", x + size / 2, y + size / 2, size);
+    ctx.restore();
+  }
+
+  drawOutfitShopPreview(ctx, cx, cy) {
+    ctx.save();
+    ctx.globalAlpha = 0.96;
+    this.drawOutfitPreviewCharacter(ctx, cx, cy, true);
+    ctx.restore();
+  }
+
+  drawOutfitShopSection(ctx, section, x1, x2) {
+    ctx.save();
+    ctx.fillStyle = "#52636b";
+    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(section.label, x1, section.y + 7);
+    ctx.restore();
+
+    const cardY = section.y + 21;
+    const cardSize = 52;
+    section.options.forEach((optionId, index) => {
+      const optionX = index === 0 ? x1 : x2;
+      this.drawOutfitShopOptionCard(ctx, section.part, optionId, optionX, cardY, cardSize);
+    });
+
+    if (section.note) {
+      ctx.save();
+      ctx.fillStyle = "rgba(82, 99, 107, 0.58)";
+      ctx.font = "bold 10px Arial, Helvetica, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(section.note, (x1 + x2 + cardSize) / 2, section.y + 87);
+      ctx.restore();
+    }
+  }
+
+  drawOutfitShopOptionCard(ctx, part, optionId, x, y, size) {
+    const selected = this.outfit[part] === optionId;
+    this.uiPanel.buttons.push({ id: `outfit-option-${part}:${optionId}`, x, y, w: size, h: size });
+    ctx.save();
+    ctx.fillStyle = selected ? "rgba(229, 252, 255, 0.98)" : "rgba(244, 249, 251, 0.98)";
+    this.roundRect(ctx, x, y, size, size, 8);
+    ctx.fill();
+    ctx.strokeStyle = selected ? "#5bd8ee" : "rgba(91, 125, 138, 0.16)";
+    ctx.lineWidth = selected ? 2.5 : 1;
+    ctx.stroke();
+    this.drawOutfitOptionPreview(ctx, optionId, x + size / 2, y + size / 2);
+    ctx.restore();
+  }
   drawOutfitPreview(ctx, cx, cy) {
     ctx.save();
     ctx.fillStyle = "rgba(255,255,255,0.24)";
