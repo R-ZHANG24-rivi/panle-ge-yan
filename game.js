@@ -4106,7 +4106,7 @@ class Game {
     const w = CONFIG.logicalWidth * 0.78;
     const h = 27;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - 146;
+    const y = CONFIG.logicalHeight - 164;
     const innerPad = 5;
     const innerX = x + innerPad;
     const innerY = y + innerPad;

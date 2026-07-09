@@ -37,9 +37,9 @@ body {
   position: fixed;
   inset: 0;
   padding:
-    env(safe-area-inset-top)
+    calc(env(safe-area-inset-top) + 18px)
     env(safe-area-inset-right)
-    env(safe-area-inset-bottom)
+    calc(env(safe-area-inset-bottom) + 30px)
     env(safe-area-inset-left);
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent !important;
