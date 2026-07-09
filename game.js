@@ -1308,6 +1308,8 @@ class InputController {
   }
 
   bindEvents() {
+    this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+    this.canvas.addEventListener("selectstart", (event) => event.preventDefault());
     this.canvas.addEventListener("pointerdown", (event) => this.onPointerDown(event));
     this.canvas.addEventListener("pointerup", (event) => this.onPointerUp(event));
     this.canvas.addEventListener("pointercancel", (event) => this.onPointerCancel(event));
@@ -1472,10 +1474,16 @@ class Game {
     const resize = () => this.resizeCanvas();
     window.addEventListener("resize", resize);
     window.addEventListener("orientationchange", resize);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", resize);
+      window.visualViewport.addEventListener("scroll", resize);
+    }
     this.resizeCanvas();
   }
 
   resizeCanvas() {
+    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
     const rect = this.canvas.getBoundingClientRect();
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
     this.canvas.width = Math.round(rect.width * dpr);
