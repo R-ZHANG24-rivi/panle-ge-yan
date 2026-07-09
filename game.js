@@ -3,8 +3,8 @@
 const DEBUG = false;
 
 const CONFIG = {
-  logicalWidth: 390,
-  logicalHeight: 844,
+  logicalWidth: 375,
+  logicalHeight: 812,
   chargeDuration: 1.4,
   minReachDistance: 70,
   maxReachDistance: 260,
