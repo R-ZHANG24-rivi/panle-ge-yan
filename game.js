@@ -91,21 +91,21 @@ const ACCURACY_TIERS = {
     label: "精准！",
     points: 100,
     maxRatio: 0.25,
-    color: "#ff3aa9",
+    color: "#FD5F7C",
     bar: "#ff7ac7"
   },
   good: {
     label: "不错！",
     points: 60,
     maxRatio: 0.65,
-    color: "#168ca7",
+    color: "#355ABA",
     bar: "#55c6df"
   },
   risky: {
     label: "惊险！",
     points: 30,
     maxRatio: 1,
-    color: "#ef7449",
+    color: "#FEAB0B",
     bar: "#ffb23f"
   }
 };
@@ -4242,39 +4242,53 @@ class Game {
   drawAccuracyFeedback(ctx) {
     const tier = ACCURACY_TIERS[this.feedback.tier] || ACCURACY_TIERS.risky;
     const progress = clamp(this.feedbackTime / 1.15, 0, 1);
-    const alpha = Math.min(1, progress * 1.4);
-    const y = 122;
+    const elapsed = 1 - progress;
+    const slideT = easeOutCubic(clamp(elapsed / 0.24, 0, 1));
+    const fadeT = easeInCubic(clamp((elapsed - 0.72) / 0.28, 0, 1));
+    const alphaIn = clamp(elapsed / 0.08, 0, 1);
+    const alpha = alphaIn * (1 - fadeT);
+    const slideOffset = lerp(52, 0, slideT);
+    const layouts = {
+      good: { badgeX: 97, badgeY: 103, badgeW: 180, badgeH: 125, pointsX: 239, pointsY: 149, comboX: 239, comboY: 148 },
+      risky: { badgeX: 100, badgeY: 103, badgeW: 180, badgeH: 127, pointsX: 250, pointsY: 153, comboX: 239, comboY: 148 },
+      precise: { badgeX: 98, badgeY: 103, badgeW: 180, badgeH: 118, pointsX: 241, pointsY: 153, comboX: 239, comboY: 148 }
+    };
+    const layout = layouts[this.feedback.tier] || layouts.risky;
     const badge = this.feedbackAssets[this.feedback.tier];
     ctx.save();
-    ctx.globalAlpha = alpha;
     if (badge && badge.loaded && !badge.failed && badge.image.complete) {
-      const targetW = this.feedback.tier === "precise" ? 205 : 198;
-      const aspect = badge.image.height / Math.max(1, badge.image.width);
-      const targetH = targetW * aspect;
-      const x = this.feedback.tier === "good" ? 75 : 82;
-      ctx.drawImage(badge.image, x, y, targetW, targetH);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(
+        badge.image,
+        layout.badgeX + slideOffset,
+        layout.badgeY,
+        layout.badgeW,
+        layout.badgeH
+      );
     } else {
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-      this.roundRect(ctx, 78, y + 18, 190, 50, 18);
+      this.roundRect(ctx, layout.badgeX + slideOffset, layout.badgeY + 22, 178, 50, 18);
       ctx.fill();
       ctx.fillStyle = tier.color;
       ctx.font = "900 30px Arial, Helvetica, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(this.feedback.label, CONFIG.logicalWidth / 2, y + 45);
+      ctx.fillText(this.feedback.label, layout.badgeX + slideOffset + 89, layout.badgeY + 47);
     }
-    this.drawFeedbackPoints(ctx, tier, this.feedback.points, 282, y + 43);
-    this.drawFeedbackCombo(ctx, this.feedback.combo, 268, y + 62, alpha);
     ctx.restore();
+    this.drawFeedbackPoints(ctx, tier, this.feedback.points, layout.pointsX + slideOffset, layout.pointsY, alpha);
+    this.drawFeedbackCombo(ctx, this.feedback.combo, layout.comboX + slideOffset, layout.comboY, alpha);
   }
 
-  drawFeedbackPoints(ctx, tier, points, x, y) {
+  drawFeedbackPoints(ctx, tier, points, x, y, alpha = 1) {
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.font = "900 26px Arial, Helvetica, sans-serif";
+    ctx.font = "900 25px Arial, Helvetica, sans-serif";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 7;
+    ctx.lineWidth = 6;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
     ctx.fillStyle = tier.color;
     const text = `+${points}`;
@@ -4290,8 +4304,8 @@ class Game {
     const cappedCombo = Math.min(10, combo);
     const asset = this.feedbackAssets[`combo${cappedCombo}`];
     if (asset && asset.loaded && !asset.failed && asset.image.complete) {
-      const w = cappedCombo >= 10 ? 76 : 66;
-      const h = w * (asset.image.height / Math.max(1, asset.image.width));
+      const w = 80;
+      const h = 80;
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.drawImage(asset.image, x, y, w, h);
