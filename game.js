@@ -4246,27 +4246,20 @@ class Game {
     const slideT = easeOutCubic(clamp(elapsed / 0.24, 0, 1));
     const fadeT = easeInCubic(clamp((elapsed - 0.72) / 0.28, 0, 1));
     const alphaIn = clamp(elapsed / 0.08, 0, 1);
-    const alpha = alphaIn * (1 - fadeT);
+    const textAlpha = alphaIn * (1 - fadeT);
     const slideOffset = lerp(52, 0, slideT);
     const layouts = {
-      good: { badgeX: 97, badgeY: 103, badgeW: 180, badgeH: 125, pointsX: 239, pointsY: 149, comboX: 239, comboY: 148 },
-      risky: { badgeX: 100, badgeY: 103, badgeW: 180, badgeH: 127, pointsX: 250, pointsY: 153, comboX: 239, comboY: 148 },
-      precise: { badgeX: 98, badgeY: 103, badgeW: 180, badgeH: 118, pointsX: 241, pointsY: 153, comboX: 239, comboY: 148 }
+      good: { badgeX: 97, badgeY: 103, badgeW: 180, pointsX: 239, pointsY: 149, comboX: 239, comboY: 148 },
+      risky: { badgeX: 100, badgeY: 103, badgeW: 180, pointsX: 250, pointsY: 153, comboX: 239, comboY: 148 },
+      precise: { badgeX: 98, badgeY: 103, badgeW: 180, pointsX: 241, pointsY: 153, comboX: 239, comboY: 148 }
     };
     const layout = layouts[this.feedback.tier] || layouts.risky;
     const badge = this.feedbackAssets[this.feedback.tier];
     ctx.save();
     if (badge && badge.loaded && !badge.failed && badge.image.complete) {
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(
-        badge.image,
-        layout.badgeX + slideOffset,
-        layout.badgeY,
-        layout.badgeW,
-        layout.badgeH
-      );
+      this.drawImageContainWidth(ctx, badge.image, layout.badgeX + slideOffset, layout.badgeY, layout.badgeW);
     } else {
-      ctx.globalAlpha = alpha;
+      ctx.globalAlpha = textAlpha;
       ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
       this.roundRect(ctx, layout.badgeX + slideOffset, layout.badgeY + 22, 178, 50, 18);
       ctx.fill();
@@ -4277,8 +4270,13 @@ class Game {
       ctx.fillText(this.feedback.label, layout.badgeX + slideOffset + 89, layout.badgeY + 47);
     }
     ctx.restore();
-    this.drawFeedbackPoints(ctx, tier, this.feedback.points, layout.pointsX + slideOffset, layout.pointsY, alpha);
-    this.drawFeedbackCombo(ctx, this.feedback.combo, layout.comboX + slideOffset, layout.comboY, alpha);
+    this.drawFeedbackPoints(ctx, tier, this.feedback.points, layout.pointsX + slideOffset, layout.pointsY, textAlpha);
+    this.drawFeedbackCombo(ctx, this.feedback.combo, layout.comboX + slideOffset, layout.comboY);
+  }
+
+  drawImageContainWidth(ctx, image, x, y, targetW) {
+    const ratio = targetW / Math.max(1, image.width);
+    ctx.drawImage(image, x, y, targetW, image.height * ratio);
   }
 
   drawFeedbackPoints(ctx, tier, points, x, y, alpha = 1) {
@@ -4297,7 +4295,7 @@ class Game {
     ctx.restore();
   }
 
-  drawFeedbackCombo(ctx, combo, x, y, alpha) {
+  drawFeedbackCombo(ctx, combo, x, y) {
     if (combo <= 1) {
       return;
     }
@@ -4305,10 +4303,8 @@ class Game {
     const asset = this.feedbackAssets[`combo${cappedCombo}`];
     if (asset && asset.loaded && !asset.failed && asset.image.complete) {
       const w = 80;
-      const h = 80;
       ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.drawImage(asset.image, x, y, w, h);
+      this.drawImageContainWidth(ctx, asset.image, x, y, w);
       ctx.restore();
       return;
     }
