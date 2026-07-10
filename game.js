@@ -30,15 +30,32 @@ const CONFIG = {
   supportOffsetYMax: 176,
   supportMinSpacing: 24,
   footMinSeparation: 42,
+  themeHoldScale: 0.32,
+  themeHoldRotationMax: Math.PI / 6,
+  themeHoldCollisionPadding: 4,
+  themeHoldWallBleed: 24,
 
-  upperArmLength: 36,
-  forearmLength: 36,
-  thighLength: 45,
-  shinLength: 45,
-  torsoLength: 52,
-  shoulderWidth: 28,
-  hipWidth: 22,
-  headRadius: 14,
+  // ===================== IK 骨骼尺寸（换图时永远不要改） =====================
+  // 这些是 IK 解算关节点（肩/肘/髋/膝/踝）的依据，决定角色骨架大小。
+  // 贴图是"拉伸去贴合骨骼"，不是骨骼去贴合贴图，所以换新贴图时这些值保持不变。
+  upperArmLength: 36,   // 上臂骨长（肩→肘）
+  forearmLength: 36,    // 前臂骨长（肘→腕）
+  thighLength: 45,      // 大腿骨长（髋→膝）
+  shinLength: 45,       // 小腿骨长（膝→踝）
+  torsoLength: 52,      // 躯干长（肩线→髋线）
+  shoulderWidth: 28,    // 肩宽
+  hipWidth: 22,         // 髋宽
+  headRadius: 14,       // 头部基准半径
+  // ===================== 贴图缩放系数（比例"总开关"，已固定） =====================
+  // 这是"定下来的比例"。想整体调大/调小某部位，只改这里一个数字，
+  // 攀爬 / 下落 / 试衣间三态会同步生效。换图本身不需要动这些值。
+  headSpriteScale: 1.3,    // 头部贴图（头发/表情/刘海/配饰）整体缩放倍数
+  shirtSpriteScale: 0.75,  // 上衣贴图缩放倍数（实际绘制 = 0.26 * 本值）
+  pantsSpriteScale: 0.75,  // 裤子（大腿/小腿）贴图宽度缩放倍数
+  beltOffsetFromShirt: -7, // 腰带相对上衣底端的纵向偏移（负=上移贴住上衣底边）
+  beltSpriteScale: 0.7,    // 腰带贴图缩放倍数（实际绘制 = 0.30 * 本值）
+  thighKneeOverlap: 0.95,  // 大腿贴图长度微调（仅改长度不改宽度/锚点，用于膝盖衔接）
+  rightShoeAnchorDX: 6,    // 背面右脚鞋子脚踝锚点横向微调（源锚点x偏移，正=贴图相对脚踝点往左，仅右脚）
   handRadius: 5,
   footRadius: 6,
 
@@ -168,6 +185,8 @@ const THEME = {
 
 const HOLD_SHAPES = ["jug", "blob", "triangle", "sloper", "pinch", "smallCrimp", "volume"];
 
+const THEME01_HOLD_ASSET_BASE = "assets/theme01_holds";
+const THEME01_HOLD_MANIFEST_FILE = `${THEME01_HOLD_ASSET_BASE}/theme01_holds_manifest.json`;
 const ROUTE_HOLD_ASSET_BASE = "assets/pink_climbing_holds_complete_assets/individual_png";
 const SUPPORT_HOLD_ASSET_BASE = "assets/light_purple_climbing_holds_complete_assets/individual_png";
 const ROUTE_HOLD_ASSET_FILES = Array.from(
@@ -368,6 +387,135 @@ function rotate(point, angle) {
   };
 }
 
+function transformPolygon(points, origin, angle) {
+  return points.map((point) => {
+    const rotated = rotate(point, angle);
+    return {
+      x: origin.x + rotated.x,
+      y: origin.y + rotated.y
+    };
+  });
+}
+
+function getPolygonBounds(points) {
+  if (!points || points.length === 0) {
+    return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
+function boundsOverlap(a, b, padding = 0) {
+  return !(
+    a.maxX + padding < b.minX ||
+    b.maxX + padding < a.minX ||
+    a.maxY + padding < b.minY ||
+    b.maxY + padding < a.minY
+  );
+}
+
+function projectPolygon(points, axis) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of points) {
+    const projected = point.x * axis.x + point.y * axis.y;
+    min = Math.min(min, projected);
+    max = Math.max(max, projected);
+  }
+  return { min, max };
+}
+
+function polygonAxes(points) {
+  const axes = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const current = points[i];
+    const next = points[(i + 1) % points.length];
+    const edge = subtract(next, current);
+    const normal = normalize({ x: -edge.y, y: edge.x });
+    if (Math.hypot(normal.x, normal.y) > 0.0001) {
+      axes.push(normal);
+    }
+  }
+  return axes;
+}
+
+function polygonsIntersect(a, b, padding = 0) {
+  if (!a || !b || a.length < 3 || b.length < 3) {
+    return false;
+  }
+  const boundsA = getPolygonBounds(a);
+  const boundsB = getPolygonBounds(b);
+  if (!boundsOverlap(boundsA, boundsB, padding)) {
+    return false;
+  }
+  const axes = [...polygonAxes(a), ...polygonAxes(b)];
+  for (const axis of axes) {
+    const projectedA = projectPolygon(a, axis);
+    const projectedB = projectPolygon(b, axis);
+    if (projectedA.max + padding < projectedB.min || projectedB.max + padding < projectedA.min) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function parseSvgNumber(source, attr) {
+  const match = source.match(new RegExp(`${attr}="([^"]+)"`));
+  return match ? Number.parseFloat(match[1]) : 0;
+}
+
+function sampleSvgPath(pathData, sampleCount = 44) {
+  if (!pathData || typeof document === "undefined") {
+    return [];
+  }
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", pathData);
+  let length = 0;
+  try {
+    length = path.getTotalLength();
+  } catch (error) {
+    return [];
+  }
+  if (!Number.isFinite(length) || length <= 0) {
+    return [];
+  }
+  const points = [];
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = i / sampleCount;
+    const point = path.getPointAtLength(length * t);
+    points.push({ x: point.x, y: point.y });
+  }
+  return points;
+}
+
+function parseOutlineSvg(svgText, nativeSize, gripPx, renderScale) {
+  const width = parseSvgNumber(svgText, "width") || nativeSize.width;
+  const height = parseSvgNumber(svgText, "height") || nativeSize.height;
+  const pathMatch = svgText.match(/<path[^>]*\sd="([^"]+)"/);
+  const sampled = pathMatch ? sampleSvgPath(pathMatch[1]) : [];
+  const sourcePoints = sampled.length >= 3
+    ? sampled
+    : [
+      { x: 0, y: 0 },
+      { x: width, y: 0 },
+      { x: width, y: height },
+      { x: 0, y: height }
+    ];
+  return sourcePoints.map((point) => ({
+    x: ((point.x / Math.max(1, width)) * nativeSize.width - gripPx.x) * renderScale,
+    y: ((point.y / Math.max(1, height)) * nativeSize.height - gripPx.y) * renderScale
+  }));
+}
+
 function formatMeters(value) {
   return `${value.toFixed(1)} m`;
 }
@@ -421,7 +569,9 @@ function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection) {
 class ScoreManager {
   constructor() {
     this.storageKey = "ropeClimbJumpBestScore";
+    this.rankingsKey = "ropeClimbJumpRankings";
     this.best = this.loadBestScore();
+    this.rankings = this.loadRankings();
   }
 
   loadBestScore() {
@@ -441,6 +591,44 @@ class ScoreManager {
     }
   }
 
+  loadRankings() {
+    try {
+      const raw = window.localStorage.getItem(this.rankingsKey);
+      if (!raw) {
+        return { height: [], score: [] };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        height: Array.isArray(parsed.height) ? parsed.height.map((item) => this.normalizeRecord(item)) : [],
+        score: Array.isArray(parsed.score) ? parsed.score.map((item) => this.normalizeRecord(item)) : []
+      };
+    } catch (error) {
+      return { height: [], score: [] };
+    }
+  }
+
+  normalizeRecord(item) {
+    return {
+      holds: Number(item && item.holds) || 0,
+      height: Number(item && item.height) || 0,
+      score: Number(item && item.score) || 0,
+      time: Number(item && item.time) || Date.now()
+    };
+  }
+
+  pushRanking(record) {
+    const normalized = this.normalizeRecord({ ...record, time: Date.now() });
+    if (normalized.height <= 0 && normalized.score <= 0 && normalized.holds <= 0) {
+      return;
+    }
+    this.rankings.height = [normalized, ...this.rankings.height]
+      .sort((a, b) => b.height - a.height || b.score - a.score || b.holds - a.holds)
+      .slice(0, 5);
+    this.rankings.score = [normalized, ...this.rankings.score]
+      .sort((a, b) => b.score - a.score || b.height - a.height || b.holds - a.holds)
+      .slice(0, 5);
+  }
+
   saveBestScore(score) {
     const nextBest = {
       holds: Math.max(this.best.holds, score.holds),
@@ -451,8 +639,10 @@ class ScoreManager {
       || nextBest.height !== this.best.height
       || nextBest.score !== this.best.score;
     this.best = nextBest;
+    this.pushRanking(score);
     try {
       window.localStorage.setItem(this.storageKey, JSON.stringify(this.best));
+      window.localStorage.setItem(this.rankingsKey, JSON.stringify(this.rankings));
     } catch (error) {
       // Storage can be disabled; gameplay should continue without records.
     }
@@ -507,45 +697,112 @@ class Camera {
 }
 
 class HoldAssetManager {
-  constructor(routeFiles, supportFiles) {
-    this.routeAssets = this.loadAssets(routeFiles, "route");
-    this.supportAssets = this.loadAssets(supportFiles, "support");
-    this.assets = [...this.routeAssets, ...this.supportAssets];
+  constructor(basePath, manifestFile) {
+    this.basePath = basePath;
+    this.manifestFile = manifestFile;
+    this.themeId = null;
+    this.assets = [];
+    this.assetsById = new Map();
+    this.ready = false;
+    this.failed = false;
+    this.readyPromise = this.loadTheme();
   }
 
-  loadAssets(files, group) {
-    return files.map((src, index) => {
-      const image = new Image();
-      const asset = {
-        src,
-        image,
-        loaded: false,
-        failed: false,
-        index,
-        group
-      };
-      image.onload = () => {
-        asset.loaded = true;
-      };
-      image.onerror = () => {
-        asset.failed = true;
-      };
-      image.src = src;
-      return asset;
-    });
+  async loadTheme() {
+    try {
+      const response = await fetch(this.manifestFile);
+      if (!response.ok) {
+        throw new Error(`Failed to load hold manifest: ${response.status}`);
+      }
+      const manifest = await response.json();
+      this.themeId = manifest.themeId || "theme01";
+      const loadedAssets = await Promise.all((manifest.holds || []).map((entry, index) => this.loadHoldAsset(entry, index)));
+      this.assets = loadedAssets.filter(Boolean);
+      this.assetsById = new Map(this.assets.map((asset) => [asset.id, asset]));
+      this.ready = this.assets.length > 0;
+      this.failed = !this.ready;
+      return this.ready;
+    } catch (error) {
+      console.warn("Theme hold assets unavailable", error);
+      this.ready = false;
+      this.failed = true;
+      return false;
+    }
   }
 
-  getAssetForHold(hold, options = {}) {
-    const useRouteAsset = options.useRouteAsset || hold.type === "route";
-    const pool = useRouteAsset ? this.routeAssets : this.supportAssets;
-    if (pool.length === 0) {
+  async loadHoldAsset(entry, index) {
+    const nativeSize = {
+      width: Math.max(1, Number(entry.nativeSize && entry.nativeSize.width) || 1),
+      height: Math.max(1, Number(entry.nativeSize && entry.nativeSize.height) || 1)
+    };
+    // 当前 theme01 manifest 的 grip 点集中在左上角标记点附近。
+    // 先用图片中心作为可抓点，保持与原游戏“岩点中心判定”的玩法一致。
+    const primaryGrip = { x: 0.5, y: 0.5, type: "primary" };
+    const gripPx = {
+      x: clamp(Number(primaryGrip.x) || 0.5, 0, 1) * nativeSize.width,
+      y: clamp(Number(primaryGrip.y) || 0.5, 0, 1) * nativeSize.height
+    };
+    const src = `${this.basePath}/${entry.image}`;
+    const image = new Image();
+    const asset = {
+      id: entry.id,
+      src,
+      image,
+      loaded: false,
+      failed: false,
+      index,
+      group: "theme01",
+      nativeSize,
+      renderScale: CONFIG.themeHoldScale,
+      gripPx,
+      grips: [primaryGrip],
+      manifestGrips: (entry.grips || []).map((grip) => ({
+        x: clamp(Number(grip.x) || 0.5, 0, 1),
+        y: clamp(Number(grip.y) || 0.5, 0, 1),
+        type: grip.type || "primary"
+      }))
+    };
+    image.onload = () => {
+      asset.loaded = true;
+    };
+    image.onerror = () => {
+      asset.failed = true;
+    };
+    image.src = src;
+
+    let outlineText = "";
+    try {
+      const outlineResponse = await fetch(`${this.basePath}/${entry.outline}`);
+      outlineText = outlineResponse.ok ? await outlineResponse.text() : "";
+    } catch (error) {
+      outlineText = "";
+    }
+    asset.outlineLocal = parseOutlineSvg(outlineText, nativeSize, gripPx, asset.renderScale);
+    asset.outlineBounds = getPolygonBounds(asset.outlineLocal);
+    asset.imageDraw = {
+      x: -gripPx.x * asset.renderScale,
+      y: -gripPx.y * asset.renderScale,
+      width: nativeSize.width * asset.renderScale,
+      height: nativeSize.height * asset.renderScale
+    };
+    asset.radius = Math.max(10, Math.min(34, Math.max(asset.imageDraw.width, asset.imageDraw.height) * 0.22));
+    await waitForImageAsset(asset);
+    return asset;
+  }
+
+  getRandomAsset(seed = Math.random()) {
+    if (!this.assets.length) {
       return null;
     }
-    if (useRouteAsset) {
-      const sequenceSeed = hold.sequence ?? hold.routeId ?? 0;
-      return pool[hashNumber(hold.id * 17 + sequenceSeed * 5) % pool.length];
+    const index = Math.floor(clamp(seed, 0, 0.999999) * this.assets.length);
+    return this.assets[index];
+  }
+
+  getAssetForHold(hold) {
+    if (hold && hold.asset) {
+      return hold.asset;
     }
-    return pool[hashNumber(hold.id * 19 + 7) % pool.length];
+    return hold && hold.assetId ? this.assetsById.get(hold.assetId) || null : null;
   }
 
   isAssetReady(asset) {
@@ -586,7 +843,8 @@ class PlayerAssetManager {
 }
 
 class HoldGenerator {
-  constructor() {
+  constructor(holdAssets = null) {
+    this.holdAssets = holdAssets;
     this.routeHolds = [];
     this.supportHolds = [];
     this.nextId = 1;
@@ -612,16 +870,16 @@ class HoldGenerator {
   }
 
   createRouteHold(x, y, sequence) {
-    return {
+    return this.createHold({
       id: this.nextId++,
       type: "route",
       x,
       y,
-      radius: 13 + Math.random() * 5,
+      radius: 15,
       sequence,
-      powerUp: this.choosePowerUp(sequence),
+      powerUp: null,
       state: "normal"
-    };
+    });
   }
 
   choosePowerUp(sequence) {
@@ -636,17 +894,93 @@ class HoldGenerator {
   }
 
   createSupportHold(x, y, routeId, hidden = false, isFootRoute = false) {
-    return {
+    return this.createHold({
       id: this.nextId++,
       type: "support",
       x,
       y,
-      radius: 7 + Math.random() * 4,
+      radius: 12,
       routeId,
       state: "normal",
       hidden,
       isFootRoute
+    });
+  }
+
+  createHold(base) {
+    const asset = this.holdAssets && this.holdAssets.ready
+      ? this.holdAssets.getRandomAsset(Math.random())
+      : null;
+    const hold = {
+      ...base,
+      asset,
+      assetId: asset ? asset.id : null,
+      rotation: (Math.random() * 2 - 1) * CONFIG.themeHoldRotationMax,
+      grips: []
     };
+    if (asset) {
+      hold.radius = asset.radius;
+    }
+    this.updateHoldGeometry(hold);
+    return hold;
+  }
+
+  updateHoldGeometry(hold) {
+    const asset = hold.asset || (this.holdAssets && this.holdAssets.getAssetForHold(hold));
+    if (!asset) {
+      hold.outlineWorld = null;
+      hold.outlineBounds = null;
+      hold.grips = [{ x: hold.x, y: hold.y, type: "primary" }];
+      return hold;
+    }
+    hold.asset = asset;
+    hold.assetId = asset.id;
+    const origin = { x: hold.x, y: hold.y };
+    hold.outlineWorld = transformPolygon(asset.outlineLocal, origin, hold.rotation);
+    hold.outlineBounds = getPolygonBounds(hold.outlineWorld);
+    hold.grips = asset.grips.map((grip) => {
+      const local = {
+        x: (grip.x * asset.nativeSize.width - asset.gripPx.x) * asset.renderScale,
+        y: (grip.y * asset.nativeSize.height - asset.gripPx.y) * asset.renderScale
+      };
+      const world = add(origin, rotate(local, hold.rotation));
+      return { ...world, type: grip.type || "primary" };
+    });
+    if (hold.grips.length === 0) {
+      hold.grips = [{ x: hold.x, y: hold.y, type: "primary" }];
+    }
+    return hold;
+  }
+
+  getCollisionHolds(extra = []) {
+    return [...this.routeHolds, ...this.supportHolds, ...extra].filter((hold) => hold && hold.outlineWorld);
+  }
+
+  isInsideWallBounds(hold) {
+    if (!hold.outlineBounds) {
+      return hold.x >= CONFIG.wallPadding && hold.x <= CONFIG.logicalWidth - CONFIG.wallPadding;
+    }
+    const bleed = CONFIG.themeHoldWallBleed;
+    return hold.outlineBounds.minX >= -bleed && hold.outlineBounds.maxX <= CONFIG.logicalWidth + bleed;
+  }
+
+  overlapsExisting(candidate, extra = []) {
+    if (!candidate.outlineWorld) {
+      return false;
+    }
+    for (const hold of this.getCollisionHolds(extra)) {
+      if (hold.id === candidate.id) {
+        continue;
+      }
+      if (polygonsIntersect(candidate.outlineWorld, hold.outlineWorld, CONFIG.themeHoldCollisionPadding)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  isCandidateClear(candidate, extra = []) {
+    return this.isInsideWallBounds(candidate) && !this.overlapsExisting(candidate, extra);
   }
 
   getDistanceBand(sequence) {
@@ -674,7 +1008,8 @@ class HoldGenerator {
       const x = clamp(previousHold.x + dx, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding);
       const y = previousHold.y - verticalGap;
       const hold = this.createRouteHold(x, y, sequence);
-      if (this.isHoldReachable(previousHold, hold, band.min, band.max)) {
+      if (this.isHoldReachable(previousHold, hold, band.min, band.max) && this.isCandidateClear(hold)) {
+        hold.powerUp = this.choosePowerUp(sequence);
         return hold;
       }
     }
@@ -685,7 +1020,21 @@ class HoldGenerator {
     const direction = previousHold.x > CONFIG.logicalWidth / 2 ? -1 : 1;
     const x = clamp(previousHold.x + direction * horizontal, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding);
     const y = previousHold.y - verticalGap;
-    return this.createRouteHold(x, y, sequence);
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+      const jitterX = attempt === 0 ? 0 : lerp(-36, 36, Math.random());
+      const hold = this.createRouteHold(
+        clamp(x + jitterX, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding),
+        y - attempt * 4,
+        sequence
+      );
+      if (this.isCandidateClear(hold)) {
+        hold.powerUp = this.choosePowerUp(sequence);
+        return hold;
+      }
+    }
+    const fallback = this.createRouteHold(x, y, sequence);
+    fallback.powerUp = this.choosePowerUp(sequence);
+    return fallback;
   }
 
   generateSupportHoldsAround(routeHold) {
@@ -715,9 +1064,11 @@ class HoldGenerator {
         const tooCloseToSupport = created.some((hold) => distance(candidate, hold) < CONFIG.supportMinSpacing);
         if (!tooCloseToRoute && !tooCloseToSupport) {
           const hold = this.createSupportHold(x, y, routeHold.id, false, i < 2);
-          this.supportHolds.push(hold);
-          created.push(hold);
-          break;
+          if (this.isCandidateClear(hold, created)) {
+            this.supportHolds.push(hold);
+            created.push(hold);
+            break;
+          }
         }
       }
     }
@@ -1066,12 +1417,22 @@ class Player {
   }
 
   getChalkBagWorldPoint() {
-    const front = this.frontFacingAmount || 0;
-    const hangX = lerp(13, -13, front);
-    const hangY = CONFIG.torsoLength / 2 + 2;
+    // 优先使用渲染时缓存的粉袋局部坐标，保证手摸的目标点与实际粉袋位置一致
+    const local = this._chalkBagLocal;
+    let hangX;
+    let hangY;
+    if (local) {
+      hangX = local.x;
+      hangY = local.y + 12; // 袋体中心在锚点下方一点
+    } else {
+      // 兜底：与渲染方向一致，背面(front=0)右侧、正面(front=1)左侧
+      const front = this.frontFacingAmount || 0;
+      hangX = lerp(11, -11, front);
+      hangY = CONFIG.torsoLength / 2 + 6;
+    }
     return add(
       { x: this.worldX, y: this.worldY },
-      rotate({ x: hangX, y: hangY + 16 }, this.bodyAngle)
+      rotate({ x: hangX, y: hangY }, this.bodyAngle)
     );
   }
 
@@ -1533,8 +1894,8 @@ class Game {
     this.scoreManager = new ScoreManager();
     this.camera = new Camera();
     this.player = new Player();
-    this.generator = new HoldGenerator();
-    this.holdAssets = new HoldAssetManager(ROUTE_HOLD_ASSET_FILES, SUPPORT_HOLD_ASSET_FILES);
+    this.holdAssets = new HoldAssetManager(THEME01_HOLD_ASSET_BASE, THEME01_HOLD_MANIFEST_FILE);
+    this.generator = new HoldGenerator(this.holdAssets);
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
     this.outfitAssetCache = new Map();
     this.uiIconAssets = this.loadUiIconAssets();
@@ -1688,12 +2049,12 @@ class Game {
 
   preloadGameAssets() {
     const imageAssets = [
-      ...this.holdAssets.assets,
       ...Object.values(this.playerAssets.assets),
       ...Object.values(this.uiIconAssets),
       ...Object.values(this.feedbackAssets)
     ];
     const tasks = [
+      () => this.holdAssets.readyPromise,
       ...imageAssets.map((asset) => () => waitForImageAsset(asset)),
       () => waitForAudioAsset(this.audio.bgm),
       () => waitForAudioAsset(this.audio.grabSuccess)
@@ -2915,29 +3276,27 @@ class Game {
     }
     const asset = this.holdAssets.getAssetForHold(hold, options);
     const assetReady = this.holdAssets.isAssetReady(asset);
-    const imageScale = hold.type === "support" ? 3.05 : 3.85;
-    const maxImageSize = Math.max(18, hold.radius * imageScale);
-    let imageWidth = maxImageSize;
-    let imageHeight = maxImageSize;
+    let imageWidth = Math.max(18, hold.radius * 2);
+    let imageHeight = imageWidth;
+    let imageDrawX = -imageWidth / 2;
+    let imageDrawY = -imageHeight / 2;
     if (assetReady) {
-      const aspect = asset.image.width / asset.image.height;
-      if (aspect >= 1) {
-        imageWidth = maxImageSize;
-        imageHeight = maxImageSize / aspect;
-      } else {
-        imageHeight = maxImageSize;
-        imageWidth = maxImageSize * aspect;
-      }
+      imageWidth = asset.imageDraw.width;
+      imageHeight = asset.imageDraw.height;
+      imageDrawX = asset.imageDraw.x;
+      imageDrawY = asset.imageDraw.y;
     }
     return {
-      radius: assetReady ? Math.max(imageWidth, imageHeight) / 2 : this.getVectorHoldRadius(hold),
+      radius: assetReady ? hold.radius : this.getVectorHoldRadius(hold),
       shape: HOLD_SHAPES[hashNumber(hold.id) % HOLD_SHAPES.length],
       color,
-      angle: (hashUnit(hold.id + 23) - 0.5) * Math.PI * 0.8,
+      angle: hold.rotation ?? ((hashUnit(hold.id + 23) - 0.5) * Math.PI * 0.8),
       asset,
       assetReady,
       imageWidth,
-      imageHeight
+      imageHeight,
+      imageDrawX,
+      imageDrawY
     };
   }
 
@@ -2999,8 +3358,8 @@ class Game {
     ctx.shadowOffsetY = 2;
     ctx.drawImage(
       visual.asset.image,
-      -visual.imageWidth / 2,
-      -visual.imageHeight / 2,
+      visual.imageDrawX,
+      visual.imageDrawY,
       visual.imageWidth,
       visual.imageHeight
     );
@@ -3247,6 +3606,9 @@ class Game {
     return true;
   }
 
+  // 【贴图原语·图片中心对齐】以图片几何中心为锚点，按 scale 等比缩放绘制。
+  // 换图规则：新图必须与旧图画布尺寸相同，且"人物内容在画布中的居中位置一致"，
+  // 否则中心会偏。上衣即用此方式，scale = 0.26 * CONFIG.shirtSpriteScale。
   drawBodyPartSprite(ctx, assetName, localX, localY, scale, rotation = 0) {
     if (!this.playerAssets.isReady(assetName)) {
       return false;
@@ -3267,6 +3629,9 @@ class Game {
     return true;
   }
 
+  // 【贴图原语·指定像素锚点对齐】以图片内的 sourceAnchor(像素坐标) 为锚点缩放绘制。
+  // 换图规则：新图需同尺寸，且图内锚点(如腰带扣中心)像素坐标与旧图一致。腰带即用此方式，
+  // sourceAnchor={x:150,y:98}，scale = 0.30 * CONFIG.beltSpriteScale。
   drawBodyPartSpriteAtAnchor(ctx, assetName, localX, localY, sourceAnchor, scale, rotation = 0) {
     if (!this.playerAssets.isReady(assetName)) {
       return false;
@@ -3287,6 +3652,9 @@ class Game {
     return true;
   }
 
+  // 【贴图原语·端点中心对齐】以骨骼端点(如头顶/手/脚)为中心缩放绘制。
+  // 换图规则：新图同尺寸 + 人物内容在画布中的居中位置一致即可。
+  // 头/发/表情/配饰即用此方式，scale 含 CONFIG.headSpriteScale。
   drawEndpointSprite(ctx, assetName, point, scale, rotation = 0) {
     if (!this.playerAssets.isReady(assetName)) {
       return false;
@@ -3352,7 +3720,14 @@ class Game {
     return true;
   }
 
-  drawAnchoredSegmentSprite(ctx, assetName, root, end, sourceStart, sourceEnd, crossScale = null) {
+  // 【贴图原语·沿骨两点拉伸（换图最严格）】把贴图从 sourceStart→sourceEnd 这段
+  // "贴图内骨骼线"拉伸对齐到骨骼实际的 root→end。用于大腿/小腿/上臂/前臂。
+  // 换图规则（务必遵守）：新图除同尺寸外，图内"起点锚点(如髋/肩)、终点锚点(如膝/腕)"
+  // 的像素坐标必须与旧图完全一致，否则会错位或斜切。
+  //   - sourceStart/sourceEnd：贴图里骨骼两端的像素坐标（换图时按新图重新量并同步）
+  //   - crossScale：横向(宽度)缩放；为 null 时用等比。裤子部件额外乘 CONFIG.pantsSpriteScale
+  //   - lengthExtend：仅拉长贴图长度不改宽度/锚点（大腿膝盖衔接用 CONFIG.thighKneeOverlap）
+  drawAnchoredSegmentSprite(ctx, assetName, root, end, sourceStart, sourceEnd, crossScale = null, lengthExtend = 1) {
     if (!this.playerAssets.isReady(assetName)) {
       return false;
     }
@@ -3362,15 +3737,30 @@ class Game {
     const targetVector = subtract(end, root);
     const sourceLength = Math.max(1, Math.hypot(sourceVector.x, sourceVector.y));
     const targetLength = Math.max(1, Math.hypot(targetVector.x, targetVector.y));
-    const lengthScale = targetLength / sourceLength;
-    const widthScale = crossScale ?? lengthScale;
+    const lengthScale = targetLength / sourceLength * lengthExtend;
+    const rawLengthScale = targetLength / sourceLength;
+    const isPantsPart = ["leftThigh", "rightThigh", "leftShin", "rightShin"].includes(assetName);
+    const pantsWidthMul = isPantsPart ? CONFIG.pantsSpriteScale : 1;
+    const baseWidth = crossScale ?? rawLengthScale;
+    const widthScale = baseWidth * pantsWidthMul;
     const angle = Math.atan2(targetVector.y, targetVector.x) - Math.atan2(sourceVector.y, sourceVector.x);
     ctx.save();
     ctx.translate(root.x, root.y);
     ctx.rotate(angle);
-    ctx.transform(widthScale, 0, 0, lengthScale, 0, 0);
     ctx.filter = this.getPantsImageFilter(assetName);
-    ctx.drawImage(image, -sourceStart.x, -sourceStart.y);
+    if (widthScale === lengthScale) {
+      // 等比缩放，无错切
+      ctx.transform(lengthScale, 0, 0, lengthScale, 0, 0);
+      ctx.drawImage(image, -sourceStart.x, -sourceStart.y);
+    } else {
+      // 非等比：沿 source 向量方向缩放长度、垂直方向缩放宽度，
+      // 通过旋转进 source 向量坐标系再缩放，避免对角贴图被斜向错切
+      const srcAngle = Math.atan2(sourceVector.y, sourceVector.x);
+      ctx.rotate(srcAngle);
+      ctx.scale(lengthScale, widthScale);
+      ctx.rotate(-srcAngle);
+      ctx.drawImage(image, -sourceStart.x, -sourceStart.y);
+    }
     ctx.restore();
     return true;
   }
@@ -3466,6 +3856,7 @@ class Game {
       upperAsset: "rightThigh",
       upperSourceStart: { x: 208, y: 71 },
       upperSourceEnd: { x: 131.98, y: 210 },
+      upperLengthExtend: CONFIG.thighKneeOverlap,
       lowerAsset: "rightShin",
       lowerSourceStart: { x: 178, y: 50 },
       lowerSourceEnd: { x: 122, y: 251 },
@@ -3485,6 +3876,7 @@ class Game {
       upperAsset: "leftThigh",
       upperSourceStart: { x: 92, y: 71 },
       upperSourceEnd: { x: 168.02, y: 210 },
+      upperLengthExtend: CONFIG.thighKneeOverlap,
       lowerAsset: "leftShin",
       lowerSourceStart: { x: 122, y: 50 },
       lowerSourceEnd: { x: 178, y: 251 },
@@ -3523,11 +3915,33 @@ class Game {
 
   drawLimb(ctx, root, joint, end, color, width, assets = {}) {
     const drawUpper = () => assets.upperAsset
-      ? this.drawAnchoredSegmentSprite(ctx, assets.upperAsset, root, joint, assets.upperSourceStart, assets.upperSourceEnd, assets.upperCrossScale)
+      ? this.drawAnchoredSegmentSprite(ctx, assets.upperAsset, root, joint, assets.upperSourceStart, assets.upperSourceEnd, assets.upperCrossScale, assets.upperLengthExtend ?? 1)
       : false;
     const drawLower = () => assets.lowerAsset
       ? this.drawAnchoredSegmentSprite(ctx, assets.lowerAsset, joint, end, assets.lowerSourceStart, assets.lowerSourceEnd, assets.lowerCrossScale)
       : false;
+    // 腿部：裤子贴图收窄后，膝盖处可能露出接缝，先在底层画一条肤色腿骨把关节补上
+    const isLeg = ["leftThigh", "rightThigh"].includes(assets.upperAsset);
+    if (isLeg) {
+      ctx.save();
+      ctx.strokeStyle = THEME.player.skinLine;
+      ctx.lineWidth = width + 2;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(root.x, root.y);
+      ctx.lineTo(joint.x, joint.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(root.x, root.y);
+      ctx.lineTo(joint.x, joint.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+      ctx.restore();
+    }
     const drewLower = assets.lowerBehindUpper ? drawLower() : false;
     const drewUpper = drawUpper();
     const drewLowerFinal = assets.lowerBehindUpper ? drewLower : drawLower();
@@ -3550,14 +3964,18 @@ class Game {
     ctx.stroke();
   }
 
+  // 【上衣绘制】贴图挂在躯干中心锚点，绘制比例 = 0.26(基准) * CONFIG.shirtSpriteScale。
+  // 换图：替换 assets/player 里对应上衣 PNG，保持同尺寸 + 人物居中位置一致，比例自动保持。
   drawTorso(ctx, pose) {
     const body = this.worldToScreen(pose.body);
     ctx.save();
     ctx.translate(body.x, body.y);
     ctx.rotate(this.player.bodyAngle);
 
-    const drewShirt = this.drawBodyPartSprite(ctx, this.getOutfitShirtAssetName(), 0, -5, 0.26);
+    const drewShirt = this.drawBodyPartSprite(ctx, this.getOutfitShirtAssetName(), 0, -5, 0.26 * CONFIG.shirtSpriteScale);
     if (!drewShirt) {
+      ctx.save();
+      ctx.scale(CONFIG.shirtSpriteScale, CONFIG.shirtSpriteScale);
       ctx.fillStyle = THEME.player.shirt;
       this.roundRect(ctx, -15, -CONFIG.torsoLength / 2 + 3, 30, CONFIG.torsoLength * 0.70, 9);
       ctx.fill();
@@ -3570,6 +3988,7 @@ class Game {
       ctx.lineTo(-15, -CONFIG.torsoLength / 2 + 31);
       ctx.closePath();
       ctx.fill();
+      ctx.restore();
     }
 
     ctx.restore();
@@ -3593,7 +4012,7 @@ class Game {
     const hipAxis = normalize(hipVector);
     const fallbackAxis = rotate({ x: 1, y: 0 }, this.player.bodyAngle);
     const axis = Math.hypot(hipAxis.x, hipAxis.y) > 0 ? hipAxis : fallbackAxis;
-    const visualHalfWidth = 8;
+    const visualHalfWidth = 8 * CONFIG.pantsSpriteScale;
     const targetLeft = add(hipMidpoint, scale(axis, -visualHalfWidth));
     const targetRight = add(hipMidpoint, scale(axis, visualHalfWidth));
     this.drawAnchoredPairSprite(
@@ -3606,24 +4025,38 @@ class Game {
     );
   }
 
+  // 【下半身装饰绘制】负责腰带贴图 + 腰带连接带 + 粉袋。
+  //   - beltY = 上衣底端 + CONFIG.beltOffsetFromShirt（腰带纵向位置，负值上移）
+  //   - beltScale = 0.30(基准) * CONFIG.beltSpriteScale
+  //   - 图层顺序：先连接带(下层) → 再腰带贴图(上层)，让腰带盖住连接带上端
+  // 换图(腰带)：替换 belt.png 保持同尺寸，且图内腰扣中心锚点仍在 {x:150,y:98}。
   drawLowerBodyAssets(ctx, pose) {
     const body = this.worldToScreen(pose.body);
-    ctx.save();
-    ctx.translate(body.x, body.y);
-    ctx.rotate(this.player.bodyAngle);
-    this.drawBodyPartSpriteAtAnchor(ctx, "belt", 0, CONFIG.torsoLength / 2 + 16, { x: 150, y: 98 }, 0.30);
-    ctx.restore();
-
+    const beltY = this.getShirtBottomLocalY() + CONFIG.beltOffsetFromShirt;
+    const beltScale = 0.30 * CONFIG.beltSpriteScale;
+    // 先画连接带（下层），再画腰带贴图（上层）盖住连接带上端
     this.drawBeltLegConnections(ctx, pose);
 
     ctx.save();
     ctx.translate(body.x, body.y);
     ctx.rotate(this.player.bodyAngle);
+    this.drawBodyPartSpriteAtAnchor(ctx, "belt", 0, beltY, { x: 150, y: 98 }, beltScale);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(body.x, body.y);
+    ctx.rotate(this.player.bodyAngle);
+    // 粉袋挂在腰带侧边中段：背面朝向挂右侧（正X），正面朝向挂左侧（负X）
     const bagFront = this.player.frontFacingAmount || 0;
-    const bagHangX = lerp(13, -13, bagFront);
-    const bagHangY = CONFIG.torsoLength / 2 + 2;
-    const bagSway = Math.sin((this.player.animTime || 0) * 6 + this.player.worldY * 0.02) * 1.8;
-    this.drawBodyPartSpriteAtAnchor(ctx, this.getOutfitChalkBagAssetName(), bagHangX + bagSway, bagHangY, { x: 155, y: 49 }, 0.30, bagSway * 0.015);
+    const beltHalfWidth = 150 * beltScale; // 腰带贴图半宽（含空白），实际带体略窄
+    const bagAnchorX = beltHalfWidth * 0.42; // 腰带侧边偏内
+    // 背面朝向(front=0)挂右侧(+X)，正面朝向(front=1)挂左侧(-X)
+    const bagHangX = lerp(bagAnchorX, -bagAnchorX, bagFront);
+    const bagHangY = beltY - 6; // 让袋体中段与腰带纵向中心对齐
+    // 缓存粉袋局部坐标（相对 body 中心，未含摆动），供摸粉袋动作对齐
+    this.player._chalkBagLocal = { x: bagHangX, y: bagHangY };
+    const bagSway = Math.sin((this.player.animTime || 0) * 6 + this.player.worldY * 0.02) * 1.5;
+    this.drawBodyPartSpriteAtAnchor(ctx, this.getOutfitChalkBagAssetName(), bagHangX + bagSway, bagHangY, { x: 150, y: 60 }, 0.24, bagSway * 0.015);
     ctx.restore();
   }
 
@@ -3635,6 +4068,19 @@ class Game {
       return "shirtMale";
     }
     return "shirt";
+  }
+
+  // 上衣底端在 body 局部坐标的 Y 值（用于让腰带对齐上衣下边缘）
+  getShirtBottomLocalY() {
+    const shirtCenterY = -5; // drawTorso 里上衣中心的 localY
+    const shirtScale = 0.26 * CONFIG.shirtSpriteScale;
+    const assetName = this.getOutfitShirtAssetName();
+    if (this.playerAssets.isReady(assetName)) {
+      const image = this.playerAssets.get(assetName).image;
+      return shirtCenterY + (image.height * shirtScale) / 2;
+    }
+    // 矢量兜底：上衣底端约在 torso 下部（同样受 shirtSpriteScale 影响）
+    return (-CONFIG.torsoLength / 2 + 3 + CONFIG.torsoLength * 0.70) * CONFIG.shirtSpriteScale;
   }
 
   getOutfitChalkBagAssetName() {
@@ -3651,6 +4097,9 @@ class Game {
     return null;
   }
 
+  // 【腰带连接带（代码绘制，非贴图）】两根线：上端连腰带黄色腰扣左右两侧，
+  // 下端连裤腿深色线段中点(mapAnchoredSegmentPoint 用大腿贴图源锚点映射)。颜色随腰带主色。
+  // 换图注意：若换裤子导致深色线段位置变化，需同步下端映射锚点；换腰带若腰扣宽度变化，调 buckleSideX。
   drawBeltLegConnections(ctx, pose) {
     const toScreen = (point) => this.worldToScreen(point);
     const leftHip = toScreen(pose.leftHip);
@@ -3671,8 +4120,13 @@ class Game {
       { x: 93.18, y: 210 },
       { x: 126, y: 149 }
     );
-    const leftBeltSide = this.getBodyLocalPoint(pose, -7, CONFIG.torsoLength / 2 + 1);
-    const rightBeltSide = this.getBodyLocalPoint(pose, 10, CONFIG.torsoLength / 2 + 1);
+    // 上端连接到已下移腰带的黄色腰扣左右两侧
+    const beltY = this.getShirtBottomLocalY() + CONFIG.beltOffsetFromShirt;
+    const beltScale = 0.30 * CONFIG.beltSpriteScale;
+    const buckleSideX = 17 * beltScale;          // 黄色腰扣半宽约17
+    const beltBandY = beltY - 50.5 * beltScale;  // 腰带带体纵向中心
+    const leftBeltSide = this.getBodyLocalPoint(pose, -buckleSideX, beltBandY);
+    const rightBeltSide = this.getBodyLocalPoint(pose, buckleSideX, beltBandY);
 
     ctx.save();
     ctx.strokeStyle = "#1687bf";
@@ -3854,6 +4308,9 @@ class Game {
     }
   }
 
+  // 【头部绘制】头/发/表情/配饰均通过 drawEndpointSprite 以头顶端点为中心缩放，
+  // 缩放含 CONFIG.headSpriteScale(1.3)。基准比例如 0.145，正/背面与不同发型分支。
+  // 换图：替换对应头部 PNG，保持同尺寸 + 人物在画布中的居中位置一致，比例自动保持。
   drawHead(ctx, head) {
     const isFront = this.player.frontFacingAmount > 0.55;
     if (!isFront && this.outfit && this.outfit.hair !== "hair_01") {
@@ -3862,29 +4319,39 @@ class Game {
     }
     if (isFront && this.outfit && this.outfit.hair === "hair_male" && this.playerAssets.isReady("headMaleFront")) {
       const yOffset = 3;
-      this.drawEndpointSprite(ctx, "headMaleFront", { x: head.x, y: head.y + yOffset }, 0.145);
+      this.drawEndpointSprite(ctx, "headMaleFront", { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitGlasses(ctx, head, true, yOffset);
       return;
     }
     const assetName = isFront ? "headFront" : "headBack";
     if (this.playerAssets.isReady(assetName)) {
       const yOffset = isFront ? 3 : 1;
-      this.drawEndpointSprite(ctx, assetName, { x: head.x, y: head.y + yOffset }, 0.145);
+      this.drawEndpointSprite(ctx, assetName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitHair(ctx, head, isFront, yOffset);
       this.drawOutfitGlasses(ctx, head, isFront, yOffset);
       return;
     }
     if (this.player.frontFacingAmount > 0.55) {
+      ctx.save();
+      ctx.translate(head.x, head.y);
+      ctx.scale(CONFIG.headSpriteScale, CONFIG.headSpriteScale);
+      ctx.translate(-head.x, -head.y);
       this.drawFrontHead(ctx, head);
+      ctx.restore();
       this.drawOutfitHair(ctx, head, true, 0);
       this.drawOutfitGlasses(ctx, head, true, 0);
       return;
     }
+    ctx.save();
+    ctx.translate(head.x, head.y);
+    ctx.scale(CONFIG.headSpriteScale, CONFIG.headSpriteScale);
+    ctx.translate(-head.x, -head.y);
     ctx.fillStyle = THEME.player.skin;
     ctx.beginPath();
     ctx.arc(head.x + 2, head.y, CONFIG.headRadius * 0.88, 0, Math.PI * 2);
     ctx.fill();
     this.drawHair(ctx, head);
+    ctx.restore();
     this.drawOutfitHair(ctx, head, false, 0);
     this.drawOutfitGlasses(ctx, head, false, 0);
   }
@@ -3894,6 +4361,9 @@ class Game {
     const center = { x: head.x, y: head.y + yOffset };
     const skinScale = 0.145;
     ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.scale(CONFIG.headSpriteScale, CONFIG.headSpriteScale);
+    ctx.translate(-center.x, -center.y);
     ctx.fillStyle = "#ffc383";
     this.roundRect(
       ctx,
@@ -3908,7 +4378,6 @@ class Game {
     ctx.arc(center.x - 98 * skinScale, center.y + 29 * skinScale, 24 * skinScale, 0, Math.PI * 2);
     ctx.arc(center.x + 95 * skinScale, center.y + 29 * skinScale, 24 * skinScale, 0, Math.PI * 2);
     ctx.fill();
-    ctx.restore();
 
     if (assetName) {
       const hairScale = this.outfit.hair === "hair_male" ? 0.158 : 0.152;
@@ -3917,6 +4386,7 @@ class Game {
     } else {
       this.drawHair(ctx, center);
     }
+    ctx.restore();
   }
 
   drawOutfitHair(ctx, head, isFront, yOffset = 0) {
@@ -3925,9 +4395,9 @@ class Game {
       return;
     }
     const isMale = this.outfit.hair === "hair_male";
-    const hairScale = isFront
+    const hairScale = (isFront
       ? (isMale ? 0.152 : 0.145)
-      : (isMale ? 0.158 : 0.152);
+      : (isMale ? 0.158 : 0.152)) * CONFIG.headSpriteScale;
     const backYOffset = isFront ? 0 : (isMale ? -1.5 : -0.8);
     this.drawEndpointSprite(ctx, assetName, { x: head.x, y: head.y + yOffset + backYOffset }, hairScale);
   }
@@ -3936,7 +4406,7 @@ class Game {
     if (!isFront || !this.outfit || this.outfit.accessory !== "glasses_01") {
       return;
     }
-    if (this.drawEndpointSprite(ctx, "glasses01", { x: head.x, y: head.y + yOffset }, 0.145)) {
+    if (this.drawEndpointSprite(ctx, "glasses01", { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale)) {
       return;
     }
     const cx = head.x + (isFront ? 0 : 2);
@@ -4076,7 +4546,9 @@ class Game {
   drawClimbingShoe(ctx, point, side, knee = null) {
     const assetName = side < 0 ? "leftFoot" : "rightFoot";
     const rotation = side * 0.08;
-    if (this.drawEndpointSpriteAtAnchor(ctx, assetName, point, { x: 167, y: 145 }, 0.3, rotation)) {
+    // 背面右脚(side>0)脚踝锚点横向微调，让小腿边缘与鞋子边缘对齐；左脚不动
+    const anchorX = 167 + (side > 0 ? CONFIG.rightShoeAnchorDX : 0);
+    if (this.drawEndpointSpriteAtAnchor(ctx, assetName, point, { x: anchorX, y: 145 }, 0.3, rotation)) {
       return;
     }
     ctx.save();
@@ -4126,42 +4598,29 @@ class Game {
   }
 
   drawHud(ctx) {
-    const hudY = 22;
-    const h = 126;
+    const hudY = 0;
+    const h = 148;
     ctx.fillStyle = "rgba(108, 203, 222, 0.42)";
     ctx.fillRect(0, hudY, CONFIG.logicalWidth, h);
 
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
-    ctx.fillText("得分", 30, hudY + 66);
-    ctx.fillText(`${this.score}`, 72, hudY + 66);
-    ctx.fillText(`连击 x${this.preciseCombo}`, 116, hudY + 66);
-    this.drawPowerUpStatus(ctx, hudY);
+    ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    ctx.fillText("得分", 23, hudY + 96);
+    ctx.font = "900 25px Arial, Helvetica, sans-serif";
+    ctx.fillText(`${this.score}`, 82, hudY + 96);
 
-    const scoreBarX = 30;
-    const scoreBarY = hudY + 78;
-    const scoreBarW = 142;
-    const scoreBarH = 8;
-    const scoreProgress = Math.min(1, (this.score % 1000) / 1000);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.56)";
-    this.roundRect(ctx, scoreBarX, scoreBarY, scoreBarW, scoreBarH, scoreBarH / 2);
-    ctx.fill();
-    if (scoreProgress > 0) {
-      ctx.fillStyle = "#ff3aa9";
-      this.roundRect(ctx, scoreBarX, scoreBarY, Math.max(scoreBarH, scoreBarW * scoreProgress), scoreBarH, scoreBarH / 2);
-      ctx.fill();
-    }
+    this.drawPowerUpStatus(ctx, hudY + 108);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
-    ctx.fillText("当前高度", 30, hudY + 98);
-    ctx.fillText("最高纪录：", 196, hudY + 98);
+    ctx.font = "900 19px Arial, Helvetica, sans-serif";
+    ctx.fillText("当前高度", 23, hudY + 126);
+    ctx.fillText("最高纪录：", 196, hudY + 126);
 
-    ctx.font = "bold 18px Arial, Helvetica, sans-serif";
-    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 102, hudY + 98);
-    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 286, hudY + 98);
+    ctx.font = "900 23px Arial, Helvetica, sans-serif";
+    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 122, hudY + 126);
+    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 296, hudY + 126);
 
     this.drawChargeBar(ctx);
   }
@@ -4634,10 +5093,10 @@ class Game {
       return;
     }
     this.uiPanel.buttons = [];
-    const x = 52;
-    const y = 226;
-    const w = CONFIG.logicalWidth - 104;
-    const h = 210;
+    const x = 30;
+    const y = 154;
+    const w = CONFIG.logicalWidth - 60;
+    const h = 430;
     this.uiPanel.bounds = { x, y, w, h };
     this.uiPanel.closeRect = { x: x + w - 43, y: y + 12, w: 30, h: 30 };
 
@@ -4658,13 +5117,13 @@ class Game {
     ctx.fillStyle = THEME.ui.text;
     ctx.font = "bold 22px Arial, Helvetica, sans-serif";
     ctx.fillText("排行榜", CONFIG.logicalWidth / 2, y + 38);
-    ctx.font = "bold 17px Arial, Helvetica, sans-serif";
-    ctx.fillText(`最高高度：${formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter)}`, CONFIG.logicalWidth / 2, y + 88);
-    ctx.fillText(`最多岩点：${this.scoreManager.best.holds}`, CONFIG.logicalWidth / 2, y + 122);
-    ctx.fillText(`最高分：${this.scoreManager.best.score || 0}`, CONFIG.logicalWidth / 2, y + 154);
+
+    this.drawRankingList(ctx, "高度排行榜", this.scoreManager.rankings.height, x + 18, y + 72, w - 36, "height");
+    this.drawRankingList(ctx, "得分排行榜", this.scoreManager.rankings.score, x + 18, y + 246, w - 36, "score");
+
     ctx.fillStyle = "#657a82";
     ctx.font = "14px Arial, Helvetica, sans-serif";
-    ctx.fillText("本机本地纪录", CONFIG.logicalWidth / 2, y + 184);
+    ctx.fillText("本机本地纪录", CONFIG.logicalWidth / 2, y + h - 24);
 
     const close = this.uiPanel.closeRect;
     ctx.fillStyle = "rgba(49, 95, 114, 0.10)";
@@ -4673,6 +5132,45 @@ class Game {
     ctx.fillStyle = "#315f72";
     ctx.font = "bold 18px Arial, Helvetica, sans-serif";
     ctx.fillText("×", close.x + close.w / 2, close.y + close.h / 2 - 1);
+    ctx.restore();
+  }
+
+  drawRankingList(ctx, title, records, x, y, w, mode) {
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = mode === "height" ? "#168ca7" : "#ff3aa9";
+    ctx.font = "900 17px Arial, Helvetica, sans-serif";
+    ctx.fillText(title, x, y);
+
+    const rows = records.length > 0 ? records : [{ holds: 0, height: 0, score: 0, empty: true }];
+    for (let index = 0; index < Math.min(5, rows.length); index += 1) {
+      const row = rows[index];
+      const rowY = y + 28 + index * 24;
+      ctx.fillStyle = index % 2 === 0 ? "rgba(108, 203, 222, 0.12)" : "rgba(255, 255, 255, 0.42)";
+      this.roundRect(ctx, x, rowY - 11, w, 22, 8);
+      ctx.fill();
+
+      ctx.fillStyle = index === 0 ? "#FD5F7C" : "#315f72";
+      ctx.font = "900 14px Arial, Helvetica, sans-serif";
+      ctx.fillText(`${index + 1}`, x + 10, rowY);
+
+      ctx.fillStyle = "#315f72";
+      ctx.font = "bold 14px Arial, Helvetica, sans-serif";
+      if (row.empty) {
+        ctx.fillText("暂无记录", x + 40, rowY);
+      } else if (mode === "height") {
+        ctx.fillText(formatMeters(row.height / CONFIG.pixelsPerMeter), x + 40, rowY);
+        ctx.textAlign = "right";
+        ctx.fillText(`${row.score}分`, x + w - 10, rowY);
+        ctx.textAlign = "left";
+      } else {
+        ctx.fillText(`${row.score}分`, x + 40, rowY);
+        ctx.textAlign = "right";
+        ctx.fillText(formatMeters(row.height / CONFIG.pixelsPerMeter), x + w - 10, rowY);
+        ctx.textAlign = "left";
+      }
+    }
     ctx.restore();
   }
 
@@ -4846,28 +5344,43 @@ class Game {
     this.player.frontFacingAmount = isFront ? 1 : 0;
     this.player.animTime = previous.animTime || 0;
 
+    // 试衣间：正常直立姿势 + 轻微待机动作（呼吸起伏、手臂微摆、身体轻晃、头部微动）
+    const t = this.player.animTime || 0;
+    const breathe = Math.sin(t * 1.6);        // 呼吸起伏
+    const sway = Math.sin(t * 0.9);           // 身体左右轻晃
+    const armSwingL = Math.sin(t * 1.15);      // 左臂微摆
+    const armSwingR = Math.sin(t * 1.15 + 0.6);// 右臂微摆（错开相位）
+    const headBob = Math.sin(t * 1.4 + 0.4);   // 头部微动
+
+    const bodyDX = sway * 1.4;                 // 身体整体轻微左右位移
+    const bodyDY = breathe * 0.8;              // 身体整体上下呼吸位移
+    const bx = cx + bodyDX;
+    const by = cy + bodyDY;
+
     const pose = {
-      body: { x: cx, y: cy },
-      head: { x: cx, y: cy - 47 },
-      leftShoulder: { x: cx - 14, y: cy - 24 },
-      rightShoulder: { x: cx + 14, y: cy - 24 },
-      leftHip: { x: cx - 11, y: cy + 28 },
-      rightHip: { x: cx + 11, y: cy + 28 },
+      body: { x: bx, y: by },
+      head: { x: bx + headBob * 0.8, y: by - 47 - breathe * 0.6 },
+      leftShoulder: { x: bx - 14, y: by - 24 + breathe * 0.5 },
+      rightShoulder: { x: bx + 14, y: by - 24 + breathe * 0.5 },
+      leftHip: { x: bx - 11, y: by + 28 },
+      rightHip: { x: bx + 11, y: by + 28 },
+      // 手臂自然下垂在身体两侧，肘、手随呼吸和微摆轻微晃动
       leftArm: {
-        joint: { x: cx - 43, y: cy + 5 },
-        end: { x: cx - 61, y: cy - 22 }
+        joint: { x: bx - 19 + armSwingL * 0.8, y: by + 2 + breathe * 0.4 },
+        end: { x: bx - 20 + armSwingL * 1.6, y: by + 30 + armSwingL * 1.2 }
       },
       rightArm: {
-        joint: { x: cx + 34, y: cy - 48 },
-        end: { x: cx + 55, y: cy - 87 }
+        joint: { x: bx + 19 + armSwingR * 0.8, y: by + 2 + breathe * 0.4 },
+        end: { x: bx + 20 + armSwingR * 1.6, y: by + 30 + armSwingR * 1.2 }
       },
+      // 双腿自然直立在髋部正下方，膝盖微屈，脚略微分开
       leftLeg: {
-        joint: { x: cx - 41, y: cy + 75 },
-        end: { x: cx - 75, y: cy + 105 }
+        joint: { x: bx - 12, y: by + 62 },
+        end: { x: bx - 13, y: by + 100 }
       },
       rightLeg: {
-        joint: { x: cx + 41, y: cy + 73 },
-        end: { x: cx + 74, y: cy + 109 }
+        joint: { x: bx + 12, y: by + 62 },
+        end: { x: bx + 13, y: by + 100 }
       }
     };
     const toScreen = (point) => this.worldToScreen(point);
@@ -4885,6 +5398,7 @@ class Game {
       upperAsset: "rightThigh",
       upperSourceStart: { x: 208, y: 71 },
       upperSourceEnd: { x: 131.98, y: 210 },
+      upperLengthExtend: CONFIG.thighKneeOverlap,
       lowerAsset: "rightShin",
       lowerSourceStart: { x: 178, y: 50 },
       lowerSourceEnd: { x: 122, y: 251 },
@@ -4903,6 +5417,7 @@ class Game {
       upperAsset: "leftThigh",
       upperSourceStart: { x: 92, y: 71 },
       upperSourceEnd: { x: 168.02, y: 210 },
+      upperLengthExtend: CONFIG.thighKneeOverlap,
       lowerAsset: "leftShin",
       lowerSourceStart: { x: 122, y: 50 },
       lowerSourceEnd: { x: 178, y: 251 },
