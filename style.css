@@ -23,6 +23,7 @@ body {
 }
 
 .game-shell {
+  --canvas-width: min(100vw, calc(var(--app-height, 100dvh) * 375 / 812));
   width: 100vw;
   width: 100dvw;
   height: 100vh;
@@ -36,11 +37,7 @@ body {
   overflow: hidden;
   position: fixed;
   inset: 0;
-  padding:
-    calc(env(safe-area-inset-top) + 30px)
-    env(safe-area-inset-right)
-    calc(env(safe-area-inset-bottom) + 48px)
-    env(safe-area-inset-left);
+  padding: 0;
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent !important;
   touch-action: none;
@@ -50,10 +47,10 @@ body {
 
 #gameCanvas {
   display: block;
-  width: auto;
-  height: min(100%, calc(100vw * 812 / 375));
-  max-width: 100%;
-  aspect-ratio: 375 / 812;
+  width: var(--canvas-width);
+  height: calc(var(--canvas-width) * 812 / 375);
+  max-width: none;
+  max-height: var(--app-height, 100dvh);
   background: #eaf8fc;
   touch-action: none;
   pointer-events: none;

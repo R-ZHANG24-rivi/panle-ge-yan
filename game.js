@@ -15,6 +15,9 @@ const CONFIG = {
   toleranceDecay: 0.35,
   pixelsPerMeter: 100,
   wallPadding: 48,
+  safeTop: 60,
+  safeBottom: 60,
+  safeSide: 20,
   playerBodyOffsetY: 96,
   chargePlayerBodyOffsetY: 66,
   cameraPlayerScreenY: 545,
@@ -4599,7 +4602,7 @@ class Game {
 
   drawHud(ctx) {
     const hudY = 0;
-    const h = 148;
+    const h = CONFIG.safeTop + 106;
     ctx.fillStyle = "rgba(108, 203, 222, 0.42)";
     ctx.fillRect(0, hudY, CONFIG.logicalWidth, h);
 
@@ -4607,20 +4610,20 @@ class Game {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
     ctx.font = "900 22px Arial, Helvetica, sans-serif";
-    ctx.fillText("得分", 23, hudY + 96);
+    ctx.fillText("得分", CONFIG.safeSide + 3, CONFIG.safeTop + 52);
     ctx.font = "900 25px Arial, Helvetica, sans-serif";
-    ctx.fillText(`${this.score}`, 82, hudY + 96);
+    ctx.fillText(`${this.score}`, CONFIG.safeSide + 62, CONFIG.safeTop + 52);
 
-    this.drawPowerUpStatus(ctx, hudY + 108);
+    this.drawPowerUpStatus(ctx, CONFIG.safeTop + 68);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
     ctx.font = "900 19px Arial, Helvetica, sans-serif";
-    ctx.fillText("当前高度", 23, hudY + 126);
-    ctx.fillText("最高纪录：", 196, hudY + 126);
+    ctx.fillText("当前高度", CONFIG.safeSide + 3, CONFIG.safeTop + 84);
+    ctx.fillText("最高纪录：", 196, CONFIG.safeTop + 84);
 
     ctx.font = "900 23px Arial, Helvetica, sans-serif";
-    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 122, hudY + 126);
-    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 296, hudY + 126);
+    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 122, CONFIG.safeTop + 84);
+    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 296, CONFIG.safeTop + 84);
 
     this.drawChargeBar(ctx);
   }
@@ -4832,7 +4835,7 @@ class Game {
     const w = CONFIG.logicalWidth * 0.78;
     const h = 27;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - 164;
+    const y = CONFIG.logicalHeight - CONFIG.safeBottom - 56;
     const innerPad = 5;
     const innerX = x + innerPad;
     const innerY = y + innerPad;
@@ -4876,16 +4879,16 @@ class Game {
   drawUiControls(ctx) {
     const size = 40;
     const gap = 9;
-    const y = 32;
+    const y = CONFIG.safeTop;
     const buttons = this.state === STATE.START
       ? [
-          { id: "back", x: 24, y },
-          { id: "sound", x: CONFIG.logicalWidth - 24 - size * 2 - gap, y },
-          { id: "share", x: CONFIG.logicalWidth - 24 - size, y }
+          { id: "back", x: CONFIG.safeSide + 4, y },
+          { id: "sound", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 2 - gap, y },
+          { id: "share", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size, y }
         ]
       : (() => {
           const ids = ["skin", "restart", "rank", "sound", "share"];
-          const marginRight = 24;
+          const marginRight = CONFIG.safeSide + 4;
           const totalW = ids.length * size + (ids.length - 1) * gap;
           let x = CONFIG.logicalWidth - marginRight - totalW;
           const rightButtons = ids.map((id) => {
@@ -4893,7 +4896,7 @@ class Game {
             x += size + gap;
             return button;
           });
-          return [{ id: "start", x: 24, y }, ...rightButtons];
+          return [{ id: "start", x: CONFIG.safeSide + 4, y }, ...rightButtons];
         })();
     this.uiButtons = [];
     ctx.save();
