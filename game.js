@@ -72,7 +72,10 @@ const CONFIG = {
   chalkShakeAmplitude: 7,
   powerUpChance: 0.13,
   powerUpMinGap: 5,
-  powerUpDuration: 3
+  powerUpDurations: {
+    magnet: 5,
+    magnifier: 10
+  }
 };
 
 const POWER_UPS = {
@@ -224,18 +227,18 @@ const UI_ICON_FILES = {
 };
 
 const FEEDBACK_ASSET_FILES = {
-  good: "assets/ui/feedback/feedback-good.png?v=20260710-feedback-1",
-  risky: "assets/ui/feedback/feedback-risky.png?v=20260710-feedback-1",
-  precise: "assets/ui/feedback/feedback-precise.png?v=20260710-feedback-1",
-  combo2: "assets/ui/feedback/combo-2.png?v=20260710-feedback-1",
-  combo3: "assets/ui/feedback/combo-3.png?v=20260710-feedback-1",
-  combo4: "assets/ui/feedback/combo-4.png?v=20260710-feedback-1",
-  combo5: "assets/ui/feedback/combo-5.png?v=20260710-feedback-1",
-  combo6: "assets/ui/feedback/combo-6.png?v=20260710-feedback-1",
-  combo7: "assets/ui/feedback/combo-7.png?v=20260710-feedback-1",
-  combo8: "assets/ui/feedback/combo-8.png?v=20260710-feedback-1",
-  combo9: "assets/ui/feedback/combo-9.png?v=20260710-feedback-1",
-  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-1"
+  good: "assets/ui/feedback/feedback-good.png?v=20260710-feedback-2",
+  risky: "assets/ui/feedback/feedback-risky.png?v=20260710-feedback-2",
+  precise: "assets/ui/feedback/feedback-precise.png?v=20260710-feedback-2",
+  combo2: "assets/ui/feedback/combo-2.png?v=20260710-feedback-2",
+  combo3: "assets/ui/feedback/combo-3.png?v=20260710-feedback-2",
+  combo4: "assets/ui/feedback/combo-4.png?v=20260710-feedback-2",
+  combo5: "assets/ui/feedback/combo-5.png?v=20260710-feedback-2",
+  combo6: "assets/ui/feedback/combo-6.png?v=20260710-feedback-2",
+  combo7: "assets/ui/feedback/combo-7.png?v=20260710-feedback-2",
+  combo8: "assets/ui/feedback/combo-8.png?v=20260710-feedback-2",
+  combo9: "assets/ui/feedback/combo-9.png?v=20260710-feedback-2",
+  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-2"
 };
 
 const AUDIO_FILES = {
@@ -2133,8 +2136,9 @@ class Game {
     if (!POWER_UPS[type]) {
       return;
     }
-    this.powerUps[type] = CONFIG.powerUpDuration;
-    this.showToast(`${POWER_UPS[type].label}生效 3 秒`);
+    const duration = CONFIG.powerUpDurations[type] || 3;
+    this.powerUps[type] = duration;
+    this.showToast(`${POWER_UPS[type].label}生效 ${duration} 秒`);
   }
 
   hasActivePowerUp() {
