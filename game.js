@@ -4243,23 +4243,22 @@ class Game {
     const tier = ACCURACY_TIERS[this.feedback.tier] || ACCURACY_TIERS.risky;
     const progress = clamp(this.feedbackTime / 1.15, 0, 1);
     const elapsed = 1 - progress;
-    const slideT = easeOutCubic(clamp(elapsed / 0.24, 0, 1));
-    const fadeT = easeInCubic(clamp((elapsed - 0.72) / 0.28, 0, 1));
-    const alphaIn = clamp(elapsed / 0.08, 0, 1);
-    const textAlpha = alphaIn * (1 - fadeT);
-    const slideOffset = lerp(52, 0, slideT);
+    const enterT = easeOutCubic(clamp(elapsed / 0.24, 0, 1));
+    const exitT = easeInCubic(clamp((elapsed - 0.72) / 0.28, 0, 1));
+    const feedbackAlpha = 1 - exitT;
+    const slideOffset = exitT > 0 ? lerp(0, -46, exitT) : lerp(52, 0, enterT);
     const layouts = {
-      good: { badgeX: 97, badgeY: 103, badgeW: 180, pointsX: 239, pointsY: 149, comboX: 239, comboY: 148 },
-      risky: { badgeX: 100, badgeY: 103, badgeW: 180, pointsX: 250, pointsY: 153, comboX: 239, comboY: 148 },
-      precise: { badgeX: 98, badgeY: 103, badgeW: 180, pointsX: 241, pointsY: 153, comboX: 239, comboY: 148 }
+      good: { badgeX: 97, badgeY: 103, badgeW: 180, pointsX: 239, pointsY: 149, comboX: 239, comboY: 168 },
+      risky: { badgeX: 100, badgeY: 103, badgeW: 180, pointsX: 250, pointsY: 153, comboX: 239, comboY: 168 },
+      precise: { badgeX: 98, badgeY: 103, badgeW: 180, pointsX: 241, pointsY: 153, comboX: 239, comboY: 168 }
     };
     const layout = layouts[this.feedback.tier] || layouts.risky;
     const badge = this.feedbackAssets[this.feedback.tier];
     ctx.save();
+    ctx.globalAlpha = feedbackAlpha;
     if (badge && badge.loaded && !badge.failed && badge.image.complete) {
       this.drawImageContainWidth(ctx, badge.image, layout.badgeX + slideOffset, layout.badgeY, layout.badgeW);
     } else {
-      ctx.globalAlpha = textAlpha;
       ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
       this.roundRect(ctx, layout.badgeX + slideOffset, layout.badgeY + 22, 178, 50, 18);
       ctx.fill();
@@ -4270,8 +4269,8 @@ class Game {
       ctx.fillText(this.feedback.label, layout.badgeX + slideOffset + 89, layout.badgeY + 47);
     }
     ctx.restore();
-    this.drawFeedbackPoints(ctx, tier, this.feedback.points, layout.pointsX + slideOffset, layout.pointsY, textAlpha);
-    this.drawFeedbackCombo(ctx, this.feedback.combo, layout.comboX + slideOffset, layout.comboY);
+    this.drawFeedbackPoints(ctx, tier, this.feedback.points, layout.pointsX + slideOffset, layout.pointsY, feedbackAlpha);
+    this.drawFeedbackCombo(ctx, this.feedback.combo, layout.comboX + slideOffset, layout.comboY, feedbackAlpha);
   }
 
   drawImageContainWidth(ctx, image, x, y, targetW) {
@@ -4295,7 +4294,7 @@ class Game {
     ctx.restore();
   }
 
-  drawFeedbackCombo(ctx, combo, x, y) {
+  drawFeedbackCombo(ctx, combo, x, y, alpha = 1) {
     if (combo <= 1) {
       return;
     }
@@ -4304,11 +4303,13 @@ class Game {
     if (asset && asset.loaded && !asset.failed && asset.image.complete) {
       const w = 80;
       ctx.save();
+      ctx.globalAlpha = alpha;
       this.drawImageContainWidth(ctx, asset.image, x, y, w);
       ctx.restore();
       return;
     }
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.font = "900 16px Arial, Helvetica, sans-serif";
