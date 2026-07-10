@@ -15,9 +15,10 @@ const CONFIG = {
   toleranceDecay: 0.35,
   pixelsPerMeter: 100,
   wallPadding: 48,
-  safeTop: 60,
+  safeTop: 40,
   safeBottom: 60,
   safeSide: 20,
+  topControlsY: 28,
   playerBodyOffsetY: 96,
   chargePlayerBodyOffsetY: 66,
   cameraPlayerScreenY: 545,
@@ -52,13 +53,13 @@ const CONFIG = {
   // ===================== 贴图缩放系数（比例"总开关"，已固定） =====================
   // 这是"定下来的比例"。想整体调大/调小某部位，只改这里一个数字，
   // 攀爬 / 下落 / 试衣间三态会同步生效。换图本身不需要动这些值。
-  headSpriteScale: 1.3,    // 头部贴图（头发/表情/刘海/配饰）整体缩放倍数
+  headSpriteScale: 1.17,   // 头部贴图（头发/表情/刘海/配饰）整体缩放倍数
   shirtSpriteScale: 0.75,  // 上衣贴图缩放倍数（实际绘制 = 0.26 * 本值）
   pantsSpriteScale: 0.75,  // 裤子（大腿/小腿）贴图宽度缩放倍数
   beltOffsetFromShirt: -7, // 腰带相对上衣底端的纵向偏移（负=上移贴住上衣底边）
   beltSpriteScale: 0.7,    // 腰带贴图缩放倍数（实际绘制 = 0.30 * 本值）
   thighKneeOverlap: 0.95,  // 大腿贴图长度微调（仅改长度不改宽度/锚点，用于膝盖衔接）
-  rightShoeAnchorDX: 6,    // 背面右脚鞋子脚踝锚点横向微调（源锚点x偏移，正=贴图相对脚踝点往左，仅右脚）
+  rightShoeAnchorDX: -6,   // 背面右脚鞋子脚踝锚点横向微调（源锚点x偏移，正=贴图相对脚踝点往左，仅右脚）
   handRadius: 5,
   footRadius: 6,
 
@@ -4617,13 +4618,13 @@ class Game {
     this.drawPowerUpStatus(ctx, CONFIG.safeTop + 68);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "900 19px Arial, Helvetica, sans-serif";
+    ctx.font = "900 17px Arial, Helvetica, sans-serif";
     ctx.fillText("当前高度", CONFIG.safeSide + 3, CONFIG.safeTop + 84);
-    ctx.fillText("最高纪录：", 196, CONFIG.safeTop + 84);
+    ctx.fillText("最高纪录：", 200, CONFIG.safeTop + 84);
 
-    ctx.font = "900 23px Arial, Helvetica, sans-serif";
-    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 122, CONFIG.safeTop + 84);
-    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 296, CONFIG.safeTop + 84);
+    ctx.font = "900 21px Arial, Helvetica, sans-serif";
+    ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 118, CONFIG.safeTop + 84);
+    ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 292, CONFIG.safeTop + 84);
 
     this.drawChargeBar(ctx);
   }
@@ -4835,7 +4836,7 @@ class Game {
     const w = CONFIG.logicalWidth * 0.78;
     const h = 27;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - CONFIG.safeBottom - 56;
+    const y = CONFIG.logicalHeight - CONFIG.safeBottom - 36;
     const innerPad = 5;
     const innerX = x + innerPad;
     const innerY = y + innerPad;
@@ -4879,7 +4880,7 @@ class Game {
   drawUiControls(ctx) {
     const size = 40;
     const gap = 9;
-    const y = CONFIG.safeTop;
+    const y = CONFIG.topControlsY;
     const buttons = this.state === STATE.START
       ? [
           { id: "back", x: CONFIG.safeSide + 4, y },
