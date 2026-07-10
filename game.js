@@ -271,6 +271,7 @@ const OUTFIT_OPTIONS = {
 };
 
 const STATE = {
+  LOADING: "LOADING",
   START: "START",
   READY: "READY",
   CHARGING: "CHARGING",
@@ -1450,6 +1451,63 @@ class GameAudio {
   }
 }
 
+function waitForImageAsset(asset) {
+  if (!asset || !asset.image) {
+    return Promise.resolve(false);
+  }
+  if (asset.loaded || asset.failed) {
+    return Promise.resolve(!asset.failed);
+  }
+  if (asset.image.complete && asset.image.naturalWidth > 0) {
+    asset.loaded = true;
+    asset.failed = false;
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      asset.loaded = Boolean(loaded);
+      asset.failed = !loaded;
+      resolve(loaded);
+    };
+    asset.image.addEventListener("load", () => finish(true), { once: true });
+    asset.image.addEventListener("error", () => finish(false), { once: true });
+    window.setTimeout(() => finish(asset.image.complete && asset.image.naturalWidth > 0), 6000);
+  });
+}
+
+function waitForAudioAsset(audio) {
+  if (!audio) {
+    return Promise.resolve(false);
+  }
+  if (audio.readyState >= 2) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(loaded);
+    };
+    audio.addEventListener("loadeddata", () => finish(true), { once: true });
+    audio.addEventListener("canplaythrough", () => finish(true), { once: true });
+    audio.addEventListener("error", () => finish(false), { once: true });
+    try {
+      audio.load();
+    } catch (error) {
+      finish(false);
+    }
+    window.setTimeout(() => finish(audio.readyState >= 2), 4500);
+  });
+}
+
 class Game {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1472,10 +1530,16 @@ class Game {
     this.uiToast = null;
     this.uiToastTime = 0;
     this.soundMuted = false;
+    this.loading = true;
+    this.loadingProgress = 0;
+    this.loadingLoaded = 0;
+    this.loadingTotal = 1;
+    this.loadingMessage = "加载资源中";
     this.lastTime = performance.now();
     this.resetGame();
-    this.enterStartScreen();
+    this.state = STATE.LOADING;
     this.setupResize();
+    this.preloadGameAssets();
     requestAnimationFrame((time) => this.loop(time));
   }
 
@@ -1582,6 +1646,36 @@ class Game {
     );
   }
 
+  preloadGameAssets() {
+    const imageAssets = [
+      ...this.holdAssets.assets,
+      ...Object.values(this.playerAssets.assets),
+      ...Object.values(this.uiIconAssets)
+    ];
+    const tasks = [
+      ...imageAssets.map((asset) => () => waitForImageAsset(asset)),
+      () => waitForAudioAsset(this.audio.bgm),
+      () => waitForAudioAsset(this.audio.grabSuccess)
+    ];
+    this.loadingTotal = Math.max(1, tasks.length);
+    this.loadingLoaded = 0;
+    this.loadingProgress = 0;
+
+    const promises = tasks.map((task) => task().catch(() => false).then((loaded) => {
+      this.loadingLoaded += 1;
+      this.loadingProgress = this.loadingLoaded / this.loadingTotal;
+      return loaded;
+    }));
+
+    Promise.allSettled(promises).then(() => {
+      this.loadingProgress = 1;
+      this.loading = false;
+      this.loadingMessage = "加载完成";
+      this.enterStartScreen();
+      this.lastTime = performance.now();
+    });
+  }
+
   resetGame() {
     this.state = STATE.RESTARTING;
     this.charge = 0;
@@ -1649,6 +1743,10 @@ class Game {
       }
     }
     this.updatePowerUps(deltaTime);
+
+    if (this.loading || this.state === STATE.LOADING) {
+      return;
+    }
 
     if (this.state === STATE.START) {
       this.player.updateReadyRest(deltaTime, this.currentHold, false);
@@ -1749,6 +1847,9 @@ class Game {
   }
 
   handlePressStart() {
+    if (this.loading || this.state === STATE.LOADING) {
+      return;
+    }
     this.audio.unlock();
     if (this.state === STATE.START) {
       return;
@@ -1768,6 +1869,9 @@ class Game {
   }
 
   handleUiPointer(point) {
+    if (this.loading || this.state === STATE.LOADING) {
+      return true;
+    }
     this.audio.unlock();
     if (this.uiPanel) {
       if (this.uiPanel.closeRect && this.pointInRect(point, this.uiPanel.closeRect)) {
@@ -2515,6 +2619,10 @@ class Game {
   draw() {
     const ctx = this.ctx;
     ctx.clearRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
+    if (this.loading || this.state === STATE.LOADING) {
+      this.drawLoadingScreen(ctx);
+      return;
+    }
     this.drawWall(ctx);
     this.drawSupportHolds(ctx, false);
     this.drawRouteHolds(ctx);
@@ -2550,6 +2658,60 @@ class Game {
     if (DEBUG) {
       this.drawDebug(ctx);
     }
+  }
+
+  drawLoadingScreen(ctx) {
+    const progress = clamp(this.loadingProgress || 0, 0, 1);
+    ctx.save();
+    const bg = ctx.createLinearGradient(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
+    bg.addColorStop(0, "#eefbff");
+    bg.addColorStop(0.48, "#d5f0f7");
+    bg.addColorStop(1, "#9fddeb");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
+
+    ctx.globalAlpha = 0.42;
+    this.drawWallPanels(ctx);
+    this.drawWallBoltHoles(ctx);
+    ctx.globalAlpha = 1;
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.font = "900 42px Arial, Helvetica, sans-serif";
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
+    ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 250);
+    ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 250);
+
+    ctx.fillStyle = "#315f72";
+    ctx.font = "bold 16px Arial, Helvetica, sans-serif";
+    ctx.fillText(this.loadingMessage, CONFIG.logicalWidth / 2, 316);
+
+    const w = 238;
+    const h = 18;
+    const x = (CONFIG.logicalWidth - w) / 2;
+    const y = 346;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+    this.roundRect(ctx, x, y, w, h, h / 2);
+    ctx.fill();
+
+    ctx.save();
+    this.roundRect(ctx, x + 3, y + 3, (w - 6) * progress, h - 6, (h - 6) / 2);
+    ctx.clip();
+    const fill = ctx.createLinearGradient(x, 0, x + w, 0);
+    fill.addColorStop(0, "#47bc68");
+    fill.addColorStop(0.52, "#55c6df");
+    fill.addColorStop(1, "#ff3aa9");
+    ctx.fillStyle = fill;
+    this.roundRect(ctx, x + 3, y + 3, w - 6, h - 6, (h - 6) / 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(49, 95, 114, 0.74)";
+    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    ctx.fillText(`${Math.round(progress * 100)}%`, CONFIG.logicalWidth / 2, y + 45);
+    ctx.restore();
   }
 
   drawWall(ctx) {
