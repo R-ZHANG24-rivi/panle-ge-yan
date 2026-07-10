@@ -215,7 +215,7 @@ const PLAYER_ASSET_FILES = {
 
 const UI_ICON_FILES = {
   back: "assets/ui/icon-back.png",
-  skin: "assets/ui/icon-skin.png?v=20260709-ring-1",
+  skin: "assets/ui/icon-skin.png?v=20260710-shirt-1",
   restart: "assets/ui/icon-restart.png",
   rank: "assets/ui/icon-rank.png",
   soundOn: "assets/ui/icon-sound-on.png",
