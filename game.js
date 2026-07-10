@@ -13,6 +13,8 @@ const CONFIG = {
   startingTolerance: 28,
   minimumTolerance: 12,
   toleranceDecay: 0.35,
+  targetGrabRingPadding: 14,
+  maxLives: 3,
   pixelsPerMeter: 100,
   wallPadding: 48,
   safeTop: 40,
@@ -85,6 +87,7 @@ const CONFIG = {
   fallDuration: 0.5,
   ropeCatchDuration: 0.55,
   autoBelayDescentSpeed: 185,
+  retryDescentDuration: 0.55,
 
   restSwayPeriod: 2.8,
   restSwayAmplitude: 0.045,
@@ -1270,30 +1273,17 @@ class Player {
     const current = this.motion.currentPoint || { x: this.worldX, y: this.worldY };
     const target = this.motion.targetPoint || current;
     const attempt = this.motion.attempt;
-    if (!attempt) {
-      return target;
-    }
-    if (attempt.result === "success") {
-      return lerpPoint(current, target, easeOutCubic(t));
-    }
-    const direction = normalize(subtract(target, current));
-    const ratio = attempt.result === "tooWeak"
-      ? clamp(attempt.actualReach / Math.max(attempt.targetDistance, 1), 0.3, 0.88)
-      : 1.18;
-    return {
-      x: current.x + direction.x * attempt.targetDistance * ratio,
-      y: current.y + direction.y * attempt.targetDistance * ratio
-    };
+    const releasePoint = attempt && attempt.releasePoint ? attempt.releasePoint : target;
+    return lerpPoint(current, releasePoint, easeOutCubic(t));
   }
 
-  beginLeadHandContact(targetHold) {
+  beginLeadHandContact(targetHold, contactPoint = null) {
     this.animationStage = STATE.LEAD_HAND_CONTACT;
     this.animTime = 0;
     this.animDuration = CONFIG.leadHandContactDuration;
     this.contacts[this.leadHandName] = targetHold.id;
-    this.handAims[this.leadHandName] = { x: targetHold.x, y: targetHold.y };
+    this.handAims[this.leadHandName] = contactPoint || { x: targetHold.x, y: targetHold.y };
   }
-
   beginBodyFollow(targetHold, nextLeftFoot = null, nextRightFoot = null) {
     this.animationStage = STATE.BODY_FOLLOW;
     this.animTime = 0;
@@ -1608,9 +1598,10 @@ class Player {
     return t >= 1;
   }
 
-  beginFall(reason, targetHold) {
+  beginFall(reason, targetHold, keepBackFacing = false) {
     const push = reason === "tooStrong" ? 36 : -10;
     const side = targetHold.x >= this.worldX ? 1 : -1;
+    this.keepBackFacingDuringFall = keepBackFacing;
     this.fallStart = { x: this.worldX, y: this.worldY };
     this.fallEnd = {
       x: this.worldX + side * push,
@@ -1624,7 +1615,11 @@ class Player {
     this.animDuration = CONFIG.fallDuration;
     this.frontFacingAmount = 0;
     this.headDroop = 0;
-    this.updateDanglingAims(0);
+    if (keepBackFacing) {
+      this.updateBackDanglingAims();
+    } else {
+      this.updateDanglingAims(0);
+    }
     this.animationStage = STATE.FALLING;
   }
 
@@ -1633,13 +1628,16 @@ class Player {
     const t = easeInCubic(this.animTime / this.animDuration);
     this.worldX = lerp(this.fallStart.x, this.fallEnd.x, t);
     this.worldY = lerp(this.fallStart.y, this.fallEnd.y, t);
-    this.frontFacingAmount = easeOutCubic(t);
+    this.frontFacingAmount = this.keepBackFacingDuringFall ? 0 : easeOutCubic(t);
     this.headDroop = this.frontFacingAmount;
     this.bodyAngle = Math.sin(t * Math.PI) * 0.18;
-    this.updateDanglingAims(this.frontFacingAmount);
+    if (this.keepBackFacingDuringFall) {
+      this.updateBackDanglingAims();
+    } else {
+      this.updateDanglingAims(this.frontFacingAmount);
+    }
     return t >= 1;
   }
-
   beginAutoBelayDescent() {
     this.animTime = 0;
     this.swingPhase = 0;
@@ -1660,6 +1658,58 @@ class Player {
     return this.worldY - cameraY > CONFIG.logicalHeight + 120;
   }
 
+  beginRetryDescent(targetBody, keepBackFacing = false, limbTargets = null) {
+    this.animTime = 0;
+    this.animDuration = CONFIG.retryDescentDuration;
+    this.motion.retryStart = { x: this.worldX, y: this.worldY };
+    this.motion.retryEnd = targetBody;
+    this.motion.retryLimbTargets = limbTargets;
+    this.keepBackFacingDuringRetry = keepBackFacing;
+    this.swingPhase = 0;
+    this.frontFacingAmount = keepBackFacing ? 0 : 1;
+    this.headDroop = this.frontFacingAmount;
+    this.animationStage = STATE.AUTO_DESCEND;
+  }
+
+  updateRetryDescent(deltaTime) {
+    this.animTime += deltaTime;
+    this.swingPhase += deltaTime * 4;
+    const rawT = clamp(this.animTime / this.animDuration, 0, 1);
+    const t = easeOutCubic(rawT);
+    this.worldX = lerp(this.motion.retryStart.x, this.motion.retryEnd.x, t) + Math.sin(this.swingPhase) * 1.2 * (1 - t);
+    this.worldY = lerp(this.motion.retryStart.y, this.motion.retryEnd.y, t);
+    this.bodyAngle = Math.sin(this.swingPhase) * 0.06 * (1 - t);
+    this.frontFacingAmount = this.keepBackFacingDuringRetry ? 0 : 1 - t;
+    this.headDroop = this.frontFacingAmount;
+    this.updateRetryLimbAims(rawT);
+    return rawT >= 1;
+  }
+
+  updateRetryLimbAims(rawT) {
+    const hang = {
+      leftHand: { x: this.worldX - 28, y: this.worldY + 34 },
+      rightHand: { x: this.worldX + 28, y: this.worldY + 34 },
+      leftFoot: { x: this.worldX - 19, y: this.worldY + 98 },
+      rightFoot: { x: this.worldX + 19, y: this.worldY + 98 }
+    };
+    const reachT = easeInOutCubic(clamp((rawT - 0.38) / 0.62, 0, 1));
+    const targets = this.motion.retryLimbTargets || {};
+    for (const limb of ["leftHand", "rightHand", "leftFoot", "rightFoot"]) {
+      const aim = targets[limb] || hang[limb];
+      const value = lerpPoint(hang[limb], aim, reachT);
+      if (limb.endsWith("Hand")) {
+        this.handAims[limb] = value;
+      } else {
+        this.footAims[limb] = value;
+      }
+    }
+  }
+  updateBackDanglingAims() {
+    this.handAims.leftHand = { x: this.worldX - 28, y: this.worldY + 34 };
+    this.handAims.rightHand = { x: this.worldX + 28, y: this.worldY + 34 };
+    this.footAims.leftFoot = { x: this.worldX - 19, y: this.worldY + 98 };
+    this.footAims.rightFoot = { x: this.worldX + 19, y: this.worldY + 98 };
+  }
   updateDanglingAims(frontAmount) {
     const handX = lerp(26, 32, frontAmount);
     const handY = lerp(-10, 42, frontAmount);
@@ -2097,6 +2147,9 @@ class Game {
     };
     this.holdCount = 0;
     this.climbHeight = 0;
+    this.livesRemaining = CONFIG.maxLives;
+    this.recoveringFromMiss = false;
+    this.tutorialDismissed = false;
     this.failureReason = "";
     this.roundEnded = false;
     this.newBest = false;
@@ -2177,7 +2230,7 @@ class Game {
     } else if (this.state === STATE.LAUNCHING) {
       if (this.player.updateLaunch(deltaTime)) {
         if (this.animationResult.result === "success") {
-          this.player.beginLeadHandContact(this.targetHold);
+          this.player.beginLeadHandContact(this.targetHold, this.animationResult.releasePoint);
           this.state = STATE.LEAD_HAND_CONTACT;
         } else {
           this.handleFailedGrab(this.animationResult.result);
@@ -2242,16 +2295,24 @@ class Game {
       }
     } else if (this.state === STATE.FALLING) {
       if (this.player.updateFall(deltaTime)) {
-        this.player.beginAutoBelayDescent();
+        if (this.recoveringFromMiss) {
+          const recoveryBody = this.player.getNeutralBodyForHold(this.currentHold);
+          this.player.beginRetryDescent(recoveryBody, true, this.getMissRecoveryLimbTargets(recoveryBody));
+        } else {
+          this.player.beginAutoBelayDescent();
+        }
         this.state = STATE.AUTO_DESCEND;
       }
     } else if (this.state === STATE.AUTO_DESCEND) {
-      if (this.player.updateAutoBelayDescent(deltaTime, this.camera.y)) {
+      if (this.recoveringFromMiss) {
+        if (this.player.updateRetryDescent(deltaTime)) {
+          this.finishMissRecovery();
+        }
+      } else if (this.player.updateAutoBelayDescent(deltaTime, this.camera.y)) {
         this.finalizeGameOver();
       }
     }
   }
-
   handlePressStart() {
     if (this.loading || this.state === STATE.LOADING) {
       return;
@@ -2404,13 +2465,13 @@ class Game {
   }
 
   beginCharge() {
+    this.tutorialDismissed = true;
     this.charge = 0;
     this.chargeDirection = 1;
     this.player.stopIdleRest();
     this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
     this.state = STATE.CHARGING;
   }
-
   updateCharge(deltaTime) {
     this.charge += this.chargeDirection * (deltaTime / CONFIG.chargeDuration);
     if (this.charge >= 1) {
@@ -2514,6 +2575,19 @@ class Game {
     return Math.max(0, this.player.startWorldY - (this.currentHold.y + CONFIG.playerBodyOffsetY));
   }
 
+  getTargetGrabRadius() {
+    if (!this.targetHold) {
+      return 0;
+    }
+    const targetScale = this.powerUps.magnifier > 0 ? 1.5 : 1;
+    return (this.getHoldVisualRadius(this.targetHold) + CONFIG.targetGrabRingPadding) * 1.04 * targetScale + 3 + CONFIG.handRadius;
+  }
+
+  calculateReleasePoint(actualReach) {
+    const direction = normalize(subtract(this.targetHold, this.currentHold));
+    return add(this.currentHold, scale(direction, actualReach));
+  }
+
   judgeAttempt() {
     let actualReach = this.calculateReachDistance();
     const targetDistance = this.calculateTargetDistance();
@@ -2523,13 +2597,14 @@ class Game {
     }
     const distanceError = actualReach - targetDistance;
     const reachTolerance = this.getEffectiveReachTolerance();
-    const accuracyRatio = Math.min(1, Math.abs(distanceError) / reachTolerance);
+    const releasePoint = this.calculateReleasePoint(actualReach);
+    const grabDistance = distance(releasePoint, this.targetHold);
+    const grabRadius = this.getTargetGrabRadius();
+    const accuracyRatio = Math.min(1, grabDistance / Math.max(grabRadius, 1));
     const accuracyTier = this.getAccuracyTier(accuracyRatio);
     let result = "success";
-    if (distanceError < -reachTolerance) {
-      result = "tooWeak";
-    } else if (distanceError > reachTolerance) {
-      result = "tooStrong";
+    if (grabDistance > grabRadius) {
+      result = distanceError < 0 ? "tooWeak" : "tooStrong";
     }
     return {
       result,
@@ -2537,6 +2612,9 @@ class Game {
       targetDistance,
       distanceError,
       reachTolerance,
+      releasePoint,
+      grabDistance,
+      grabRadius,
       accuracyRatio,
       accuracyTier,
       magnetBoosted: isMagnetActive,
@@ -2612,13 +2690,18 @@ class Game {
   handleFailedGrab(result) {
     this.failureReason = result === "tooStrong" ? "力量过大" : "力量不足";
     this.preciseCombo = 0;
-    this.finalizeRoundScore();
-    this.player.beginFall(result, this.targetHold);
+    this.livesRemaining = Math.max(0, this.livesRemaining - 1);
+    this.recoveringFromMiss = this.livesRemaining > 0;
+    if (!this.recoveringFromMiss) {
+      this.finalizeRoundScore();
+    } else {
+      this.showToast(`没抓住，还剩 ${this.livesRemaining} 次机会`);
+    }
+    this.player.beginFall(result, this.targetHold, this.recoveringFromMiss);
     this.charge = 0;
     this.chargeDirection = 1;
     this.state = STATE.FALLING;
   }
-
   finishSettle() {
     this.settlePlayerPose(this.previousHold, this.pendingAttempt ? this.pendingAttempt.actionType : "far");
     this.switchActiveHandOnce();
@@ -2742,6 +2825,45 @@ class Game {
     return feet;
   }
 
+  getMissRecoveryLimbTargets(bodyPosition) {
+    const actionType = this.pendingAttempt ? this.pendingAttempt.actionType : "far";
+    const lead = this.player.leadHandName;
+    const trailing = this.player.trailingHandName;
+    const targets = {
+      leftHand: { x: this.currentHold.x, y: this.currentHold.y },
+      rightHand: { x: this.currentHold.x, y: this.currentHold.y }
+    };
+    if (actionType === "near" && this.previousHold) {
+      targets[lead] = { x: this.currentHold.x, y: this.currentHold.y };
+      targets[trailing] = { x: this.previousHold.x, y: this.previousHold.y };
+    }
+    const feet = this.chooseFeetSupportsForBody("front", bodyPosition);
+    targets.leftFoot = feet.leftFoot
+      ? { x: feet.leftFoot.x, y: feet.leftFoot.y }
+      : { x: bodyPosition.x - 18, y: bodyPosition.y + 98 };
+    targets.rightFoot = feet.rightFoot
+      ? { x: feet.rightFoot.x, y: feet.rightFoot.y }
+      : { x: bodyPosition.x + 18, y: bodyPosition.y + 98 };
+    return targets;
+  }
+  finishMissRecovery() {
+    this.recoveringFromMiss = false;
+    this.tutorialDismissed = true;
+    this.failureReason = "";
+    const actionType = this.pendingAttempt ? this.pendingAttempt.actionType : "far";
+    this.animationResult = null;
+    this.pendingAttempt = null;
+    this.pendingRestHand = null;
+    this.charge = 0;
+    this.chargeDirection = 1;
+    this.settlePlayerPose(this.previousHold, actionType);
+    this.camera.beginFollowToWorldY(this.player.getNeutralBodyForHold(this.currentHold).y);
+    if (this.camera.active) {
+      this.state = STATE.CAMERA_FOLLOW;
+    } else {
+      this.state = STATE.READY;
+    }
+  }
   finalizeGameOver() {
     this.finalizeRoundScore();
     this.state = STATE.GAME_OVER;
@@ -2974,7 +3096,10 @@ class Game {
     const contactId = this.player.contacts[limbName];
     const hold = this.generator.getHoldById(contactId);
     if (hold) {
-      return { x: hold.x, y: hold.y };
+      const shouldUseHandAim = limbName.endsWith("Hand")
+        && [STATE.LEAD_HAND_CONTACT, STATE.BODY_FOLLOW].includes(this.state)
+        && this.player.handAims[limbName];
+      return shouldUseHandAim ? this.player.handAims[limbName] : { x: hold.x, y: hold.y };
     }
     if (limbName.endsWith("Hand")) {
       return this.player.handAims[limbName];
@@ -3047,7 +3172,7 @@ class Game {
         this.drawGameOver(ctx);
       } else if (this.roundEnded) {
         this.drawRoundEndedBadge(ctx);
-      } else if (this.holdCount === 0 && this.state === STATE.READY) {
+      } else if (this.holdCount === 0 && this.state === STATE.READY && !this.tutorialDismissed) {
         this.drawStartHint(ctx);
       }
       if (this.feedback) {
@@ -3321,6 +3446,8 @@ class Game {
     }
     const visual = this.getHoldVisual(hold, options);
     ctx.save();
+    ctx.globalAlpha *= options.alpha ?? 1;
+    ctx.filter = options.brightness ? `brightness(${options.brightness})` : "none";
     ctx.translate(screen.x, screen.y);
     ctx.rotate(visual.angle);
 
@@ -3346,7 +3473,6 @@ class Game {
     this.drawHoldBolt(ctx, visual.radius);
     ctx.restore();
   }
-
   drawHoldImage(ctx, hold, visual, isContact) {
     const r = visual.radius;
     if (hold.state === "target") {
@@ -3475,20 +3601,27 @@ class Game {
       if (contactedOnly !== isContact) {
         continue;
       }
-      this.drawHold(ctx, hold, isContact, { useRouteAsset: hold.isFootRoute });
+      this.drawHold(ctx, hold, isContact, {
+        useRouteAsset: hold.isFootRoute,
+        alpha: isContact ? 1 : 0.4,
+        brightness: isContact ? 1 : 1.3
+      });
     }
   }
 
   drawRouteHolds(ctx) {
     const contactIds = this.getProtectedHoldIds();
     for (const hold of this.routeHolds) {
-      this.drawHold(ctx, hold, contactIds.has(hold.id));
+      const isImportant = contactIds.has(hold.id);
+      this.drawHold(ctx, hold, isImportant, {
+        alpha: isImportant ? 1 : 0.4,
+        brightness: isImportant ? 1 : 1.3
+      });
       if (hold.powerUp) {
         this.drawPowerUpIcon(ctx, hold);
       }
     }
   }
-
   drawPowerUpIcon(ctx, hold) {
     const screen = this.worldToScreen(hold);
     if (screen.y < -90 || screen.y > CONFIG.logicalHeight + 90) {
@@ -3540,6 +3673,21 @@ class Game {
     const pulse = 1 + Math.sin(time) * 0.04;
     const targetScale = this.powerUps.magnifier > 0 ? 1.5 : 1;
     const ringRadius = (visualRadius + 14) * pulse * targetScale;
+    const glowPulse = 0.72 + Math.sin(time * 1.35) * 0.16;
+    const glowRadius = ringRadius + 20 * targetScale;
+    const glow = ctx.createRadialGradient(screen.x, screen.y, ringRadius * 0.42, screen.x, screen.y, glowRadius);
+    glow.addColorStop(0, `rgba(255, 239, 118, ${0.18 * glowPulse})`);
+    glow.addColorStop(0.48, `rgba(255, 221, 64, ${0.16 * glowPulse})`);
+    glow.addColorStop(1, "rgba(255, 221, 64, 0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 222, 74, ${0.28 * glowPulse})`;
+    ctx.lineWidth = 8.5;
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, ringRadius + 8, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.strokeStyle = "rgba(255,255,255,0.96)";
     ctx.lineWidth = 4.6;
     ctx.beginPath();
@@ -3906,15 +4054,6 @@ class Game {
       this.drawPoseDebug(ctx, pose);
     }
 
-    if (this.state === STATE.LAUNCHING && this.animationResult && this.animationResult.result === "tooStrong") {
-      const target = this.worldToScreen(this.targetHold);
-      ctx.strokeStyle = "rgba(255, 121, 96, 0.58)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(target.x - 16, target.y);
-      ctx.lineTo(target.x + 16, target.y);
-      ctx.stroke();
-    }
   }
 
   drawLimb(ctx, root, joint, end, color, width, assets = {}) {
@@ -4613,7 +4752,8 @@ class Game {
     ctx.font = "900 22px Arial, Helvetica, sans-serif";
     ctx.fillText("得分", CONFIG.safeSide + 3, CONFIG.safeTop + 52);
     ctx.font = "900 25px Arial, Helvetica, sans-serif";
-    ctx.fillText(`${this.score}`, CONFIG.safeSide + 62, CONFIG.safeTop + 52);
+    ctx.fillText(String(this.score), CONFIG.safeSide + 62, CONFIG.safeTop + 52);
+    this.drawLives(ctx, CONFIG.safeSide + 132, CONFIG.safeTop + 52);
 
     this.drawPowerUpStatus(ctx, CONFIG.safeTop + 68);
 
@@ -4629,6 +4769,23 @@ class Game {
     this.drawChargeBar(ctx);
   }
 
+  drawLives(ctx, x, y) {
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    const gap = 22;
+    for (let i = 0; i < CONFIG.maxLives; i += 1) {
+      const alive = i < this.livesRemaining;
+      ctx.fillStyle = alive ? "#ff5f8c" : "rgba(255, 255, 255, 0.42)";
+      ctx.strokeStyle = alive ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.58)";
+      ctx.lineWidth = 2;
+      const heartX = x + i * gap;
+      ctx.strokeText("♥", heartX, y + 1);
+      ctx.fillText("♥", heartX, y + 1);
+    }
+    ctx.restore();
+  }
   drawPowerUpStatus(ctx, yOffset = 0) {
     const active = [];
     if (this.powerUps.magnet > 0) {
@@ -5622,22 +5779,64 @@ class Game {
   }
 
   drawStartHint(ctx) {
-    const w = 218;
+    const pulse = 0.5 + Math.sin(performance.now() * 0.006) * 0.5;
+    const w = 276;
+    const h = 126;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = 248;
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
-    this.roundRect(ctx, x, y, w, 70, 13);
+    const y = 218;
+
+    ctx.save();
+    ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = "rgba(255,255,255,0.94)";
+    this.roundRect(ctx, x, y, w, h, 16);
     ctx.fill();
-    ctx.fillStyle = "#315f72";
-    ctx.font = "bold 18px Arial, Helvetica, sans-serif";
+    ctx.restore();
+
+    ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("按住屏幕蓄力", CONFIG.logicalWidth / 2, y + 25);
-    ctx.font = "15px Arial, Helvetica, sans-serif";
-    ctx.fillText("松开后出手", CONFIG.logicalWidth / 2, y + 49);
-    ctx.textAlign = "left";
-  }
+    ctx.fillStyle = "#315f72";
+    ctx.font = "900 20px Arial, Helvetica, sans-serif";
+    ctx.fillText("按住屏幕蓄力", CONFIG.logicalWidth / 2, y + 31);
+    ctx.fillStyle = "#5d7480";
+    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    ctx.fillText("绿色最轻，红色最重", CONFIG.logicalWidth / 2, y + 58);
+    ctx.fillText("松开后去抓黄色光圈里的岩点", CONFIG.logicalWidth / 2, y + 80);
 
+    const fingerX = CONFIG.logicalWidth / 2 - 86;
+    const fingerY = y + 105;
+    ctx.fillStyle = `rgba(255, 95, 140, ${0.72 + pulse * 0.20})`;
+    ctx.beginPath();
+    ctx.arc(fingerX, fingerY, 8 + pulse * 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.font = "900 13px Arial, Helvetica, sans-serif";
+    ctx.fillText("按住", fingerX + 36, fingerY + 1);
+
+    if (this.targetHold) {
+      const target = this.worldToScreen(this.targetHold);
+      const arrowStart = { x: x + w - 72, y: y + 104 };
+      const arrowEnd = { x: target.x, y: Math.min(target.y + 10, y + h + 96) };
+      ctx.strokeStyle = `rgba(255, 196, 50, ${0.62 + pulse * 0.22})`;
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(arrowStart.x, arrowStart.y);
+      ctx.quadraticCurveTo(arrowStart.x + 36, arrowStart.y - 20, arrowEnd.x, arrowEnd.y);
+      ctx.stroke();
+      const angle = Math.atan2(arrowEnd.y - arrowStart.y, arrowEnd.x - arrowStart.x);
+      ctx.beginPath();
+      ctx.moveTo(arrowEnd.x, arrowEnd.y);
+      ctx.lineTo(arrowEnd.x - Math.cos(angle - 0.45) * 11, arrowEnd.y - Math.sin(angle - 0.45) * 11);
+      ctx.lineTo(arrowEnd.x - Math.cos(angle + 0.45) * 11, arrowEnd.y - Math.sin(angle + 0.45) * 11);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(255, 196, 50, 0.82)";
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   drawGameOver(ctx) {
     ctx.fillStyle = "rgba(221, 244, 250, 0.58)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
