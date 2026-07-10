@@ -223,6 +223,21 @@ const UI_ICON_FILES = {
   share: "assets/ui/icon-share.png"
 };
 
+const FEEDBACK_ASSET_FILES = {
+  good: "assets/ui/feedback/feedback-good.png?v=20260710-feedback-1",
+  risky: "assets/ui/feedback/feedback-risky.png?v=20260710-feedback-1",
+  precise: "assets/ui/feedback/feedback-precise.png?v=20260710-feedback-1",
+  combo2: "assets/ui/feedback/combo-2.png?v=20260710-feedback-1",
+  combo3: "assets/ui/feedback/combo-3.png?v=20260710-feedback-1",
+  combo4: "assets/ui/feedback/combo-4.png?v=20260710-feedback-1",
+  combo5: "assets/ui/feedback/combo-5.png?v=20260710-feedback-1",
+  combo6: "assets/ui/feedback/combo-6.png?v=20260710-feedback-1",
+  combo7: "assets/ui/feedback/combo-7.png?v=20260710-feedback-1",
+  combo8: "assets/ui/feedback/combo-8.png?v=20260710-feedback-1",
+  combo9: "assets/ui/feedback/combo-9.png?v=20260710-feedback-1",
+  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-1"
+};
+
 const AUDIO_FILES = {
   bgm: "assets/audio/bgm1.mp3?v=20260710-grip-glide",
   grabSuccess: "assets/audio/grab-success.ogg"
@@ -1520,6 +1535,7 @@ class Game {
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
     this.outfitAssetCache = new Map();
     this.uiIconAssets = this.loadUiIconAssets();
+    this.feedbackAssets = this.loadFeedbackAssets();
     this.audio = new GameAudio(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
@@ -1546,6 +1562,27 @@ class Game {
   loadUiIconAssets() {
     const assets = {};
     for (const [name, src] of Object.entries(UI_ICON_FILES)) {
+      const image = new Image();
+      assets[name] = {
+        src,
+        image,
+        loaded: false,
+        failed: false
+      };
+      image.onload = () => {
+        assets[name].loaded = true;
+      };
+      image.onerror = () => {
+        assets[name].failed = true;
+      };
+      image.src = src;
+    }
+    return assets;
+  }
+
+  loadFeedbackAssets() {
+    const assets = {};
+    for (const [name, src] of Object.entries(FEEDBACK_ASSET_FILES)) {
       const image = new Image();
       assets[name] = {
         src,
@@ -1650,7 +1687,8 @@ class Game {
     const imageAssets = [
       ...this.holdAssets.assets,
       ...Object.values(this.playerAssets.assets),
-      ...Object.values(this.uiIconAssets)
+      ...Object.values(this.uiIconAssets),
+      ...Object.values(this.feedbackAssets)
     ];
     const tasks = [
       ...imageAssets.map((asset) => () => waitForImageAsset(asset)),
@@ -4205,31 +4243,71 @@ class Game {
     const tier = ACCURACY_TIERS[this.feedback.tier] || ACCURACY_TIERS.risky;
     const progress = clamp(this.feedbackTime / 1.15, 0, 1);
     const alpha = Math.min(1, progress * 1.4);
-    const w = 210;
-    const h = 48;
-    const x = (CONFIG.logicalWidth - w) / 2;
-    const y = 132;
+    const y = 122;
+    const badge = this.feedbackAssets[this.feedback.tier];
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 6;
-    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    this.roundRect(ctx, x, y, w, h, 24);
-    ctx.fill();
+    if (badge && badge.loaded && !badge.failed && badge.image.complete) {
+      const targetW = this.feedback.tier === "precise" ? 205 : 198;
+      const aspect = badge.image.height / Math.max(1, badge.image.width);
+      const targetH = targetW * aspect;
+      const x = this.feedback.tier === "good" ? 75 : 82;
+      ctx.drawImage(badge.image, x, y, targetW, targetH);
+    } else {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+      this.roundRect(ctx, 78, y + 18, 190, 50, 18);
+      ctx.fill();
+      ctx.fillStyle = tier.color;
+      ctx.font = "900 30px Arial, Helvetica, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(this.feedback.label, CONFIG.logicalWidth / 2, y + 45);
+    }
+    this.drawFeedbackPoints(ctx, tier, this.feedback.points, 282, y + 43);
+    this.drawFeedbackCombo(ctx, this.feedback.combo, 268, y + 62, alpha);
     ctx.restore();
+  }
 
+  drawFeedbackPoints(ctx, tier, points, x, y) {
     ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = tier.bar;
-    this.roundRect(ctx, x + 8, y + h - 13, (w - 16) * (1 - this.feedback.ratio), 6, 3);
-    ctx.fill();
-    ctx.textAlign = "center";
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
+    ctx.font = "900 26px Arial, Helvetica, sans-serif";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
     ctx.fillStyle = tier.color;
-    ctx.font = "bold 22px Arial, Helvetica, sans-serif";
-    const comboText = this.feedback.combo > 1 ? `  连击 x${this.feedback.combo}` : "";
-    ctx.fillText(`${this.feedback.label} +${this.feedback.points}${comboText}`, CONFIG.logicalWidth / 2, y + 22);
+    const text = `+${points}`;
+    ctx.strokeText(text, x, y);
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
+
+  drawFeedbackCombo(ctx, combo, x, y, alpha) {
+    if (combo <= 1) {
+      return;
+    }
+    const cappedCombo = Math.min(10, combo);
+    const asset = this.feedbackAssets[`combo${cappedCombo}`];
+    if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+      const w = cappedCombo >= 10 ? 76 : 66;
+      const h = w * (asset.image.height / Math.max(1, asset.image.width));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(asset.image, x, y, w, h);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.font = "900 16px Arial, Helvetica, sans-serif";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.fillStyle = ACCURACY_TIERS.precise.color;
+    const text = `连击x${combo}`;
+    ctx.strokeText(text, x + 4, y + 14);
+    ctx.fillText(text, x + 4, y + 14);
     ctx.restore();
   }
 
