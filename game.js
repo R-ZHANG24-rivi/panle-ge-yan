@@ -24,6 +24,7 @@ const CONFIG = {
   playerBodyOffsetY: 96,
   chargePlayerBodyOffsetY: 66,
   cameraPlayerScreenY: 545,
+  startDemoPlayerScreenY: 400,
   initialHoldCount: 14,
   holdBufferAhead: 14,
   removeBelowCamera: 260,
@@ -258,6 +259,14 @@ const UI_ICON_FILES = {
   share: "assets/ui/icon-share.png"
 };
 
+const FIGMA_UI_ASSET_FILES = {
+  coverTitle: "assets/ui/figma/cover-title.png?v=20260712-figma-cover-1",
+  startButton: "assets/ui/figma/btn-start.png?v=20260712-figma-cover-1",
+  outfitButton: "assets/ui/figma/btn-outfit.png?v=20260712-figma-cover-1",
+  rankButton: "assets/ui/figma/btn-rank.png?v=20260712-figma-cover-1",
+  magnet: "assets/ui/figma/powerup-magnet.png?v=20260712-figma-cover-1",
+  magnifier: "assets/ui/figma/powerup-magnifier.png?v=20260712-figma-cover-1"
+};
 const FEEDBACK_ASSET_FILES = {
   good: "assets/ui/feedback/feedback-good.png?v=20260710-feedback-2",
   risky: "assets/ui/feedback/feedback-risky.png?v=20260710-feedback-2",
@@ -1960,7 +1969,7 @@ class AudioManager {
     };
     this.bgm = this.createAudio(files.bgm, {
       loop: true,
-      volume: 0.05632,
+      volume: 0.07,
       preload: "auto"
     });
     this.initContext();
@@ -2288,6 +2297,7 @@ class Game {
     this.outfitAssetCache = new Map();
     this.uiIconAssets = this.loadUiIconAssets();
     this.feedbackAssets = this.loadFeedbackAssets();
+    this.figmaUiAssets = this.loadFigmaUiAssets();
     this.audio = new AudioManager(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
@@ -2332,6 +2342,30 @@ class Game {
     return assets;
   }
 
+  loadImageAssetMap(files) {
+    const assets = {};
+    for (const [name, src] of Object.entries(files)) {
+      const image = new Image();
+      assets[name] = {
+        src,
+        image,
+        loaded: false,
+        failed: false
+      };
+      image.onload = () => {
+        assets[name].loaded = true;
+      };
+      image.onerror = () => {
+        assets[name].failed = true;
+      };
+      image.src = src;
+    }
+    return assets;
+  }
+
+  loadFigmaUiAssets() {
+    return this.loadImageAssetMap(FIGMA_UI_ASSET_FILES);
+  }
   loadFeedbackAssets() {
     const assets = {};
     for (const [name, src] of Object.entries(FEEDBACK_ASSET_FILES)) {
@@ -2439,7 +2473,8 @@ class Game {
     const imageAssets = [
       ...Object.values(this.playerAssets.assets),
       ...Object.values(this.uiIconAssets),
-      ...Object.values(this.feedbackAssets)
+      ...Object.values(this.feedbackAssets),
+      ...Object.values(this.figmaUiAssets)
     ];
     const tasks = [
       () => this.holdAssets.readyPromise,
@@ -2494,6 +2529,14 @@ class Game {
     this.animationResult = null;
     this.pendingAttempt = null;
     this.pendingRestHand = null;
+    this.startDemoPhase = "rest";
+    this.startDemoTimer = 0;
+    this.startDemoRestDuration = 0.46;
+    this.startDemoMoveDuration = 0.74;
+    this.startDemoChargeDuration = 0.56;
+    this.startDemoChargeTarget = 0.62;
+    this.startDemoAttempt = null;
+    this.startDemoActionType = "far";
     this.currentIndex = 0;
     this.player.reset(CONFIG.logicalWidth / 2, 760);
     this.routeHolds = this.generator.generateInitialHolds(CONFIG.logicalWidth / 2, 760);
@@ -2509,6 +2552,7 @@ class Game {
     this.resetGame();
     this.uiPanel = null;
     this.charge = 0;
+    this.prepareStartDemoClimb();
     this.state = STATE.START;
   }
 
@@ -2517,6 +2561,187 @@ class Game {
     this.showToast("开始攀岩");
   }
 
+  prepareStartDemoClimb() {
+    this.startDemoPhase = "rest";
+    this.startDemoTimer = 0;
+    this.startDemoRestDuration = 0.46;
+    this.startDemoMoveDuration = 0.74;
+    this.startDemoChargeDuration = 0.56;
+    this.startDemoChargeTarget = 0.62;
+    this.startDemoAttempt = null;
+    this.startDemoActionType = "far";
+    this.generator.ensureHoldBuffer(this.currentIndex);
+    this.settlePlayerPose(null, "far");
+    this.snapStartDemoCameraToPlayer();
+  }
+
+  getStartDemoCameraY(worldY) {
+    return worldY - CONFIG.startDemoPlayerScreenY;
+  }
+
+  snapStartDemoCameraToPlayer() {
+    this.camera.y = this.getStartDemoCameraY(this.player.worldY);
+    this.camera.startY = this.camera.y;
+    this.camera.targetY = this.camera.y;
+    this.camera.elapsed = 0;
+    this.camera.active = false;
+  }
+
+  beginStartDemoCameraFollow(worldY, duration = CONFIG.cameraFollowDuration) {
+    this.camera.startY = this.camera.y;
+    this.camera.targetY = this.getStartDemoCameraY(worldY);
+    this.camera.elapsed = 0;
+    this.camera.duration = duration;
+    this.camera.active = Math.abs(this.camera.targetY - this.camera.startY) > 0.5;
+  }
+
+  updateStartDemoClimb(deltaTime) {
+    if (!this.currentHold || !this.targetHold) {
+      this.prepareStartDemoClimb();
+      return;
+    }
+
+    if (this.startDemoPhase === "charge") {
+      this.startDemoTimer += deltaTime;
+      const t = clamp(this.startDemoTimer / this.startDemoChargeDuration, 0, 1);
+      this.charge = this.startDemoChargeTarget * easeOutCubic(t);
+      this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
+      if (t >= 1) {
+        this.startDemoAttempt = this.createStartDemoAttempt();
+        this.startDemoActionType = this.startDemoAttempt.actionType;
+        this.player.beginRelease();
+        this.startDemoPhase = "release";
+        this.startDemoTimer = 0;
+      }
+      return;
+    }
+
+    if (this.startDemoPhase === "release") {
+      if (this.player.updateTimed(deltaTime) >= 1) {
+        this.player.beginLaunch(this.currentHold, this.targetHold, this.startDemoAttempt, this.startDemoActionType);
+        this.player.animDuration = CONFIG.launchDuration * 1.35;
+        this.startDemoPhase = "launch";
+      }
+      return;
+    }
+
+    if (this.startDemoPhase === "launch") {
+      if (this.player.updateLaunch(deltaTime)) {
+        this.player.beginLeadHandContact(this.targetHold, this.startDemoAttempt.releasePoint);
+        this.startDemoPhase = "contact";
+      }
+      return;
+    }
+
+    if (this.startDemoPhase === "contact") {
+      if (this.player.updateTimed(deltaTime) >= 1) {
+        this.advanceStartDemoHold();
+      }
+      return;
+    }
+
+    if (this.startDemoPhase === "bodyFollow") {
+      this.updateCameraDuringClimb(deltaTime);
+      if (this.player.updateBodyFollow(deltaTime)) {
+        if (this.player.motion.feetSyncActive) {
+          this.player.finishFeetReposition();
+        }
+        this.settlePlayerPose(this.previousHold, this.startDemoActionType);
+        this.player.switchActiveHand();
+        this.player.animationStage = STATE.READY;
+        this.completeStartDemoCameraFollowImmediately();
+        this.startDemoPhase = "rest";
+        this.startDemoTimer = 0;
+        this.charge = 0;
+      }
+      return;
+    }
+
+    this.player.updateReadyRest(deltaTime, this.currentHold, false);
+    this.startDemoTimer += deltaTime;
+    if (this.startDemoTimer >= this.startDemoRestDuration) {
+      this.beginStartDemoStep();
+    }
+  }
+
+  createStartDemoAttempt() {
+    const targetDistance = distance(this.currentHold, this.targetHold);
+    const grabRadius = this.getTargetGrabRadius();
+    const actionType = targetDistance <= CONFIG.nearMoveThreshold ? "near" : "far";
+    return {
+      result: "success",
+      targetDistance,
+      actualReach: targetDistance,
+      releasePoint: { x: this.targetHold.x, y: this.targetHold.y },
+      grabDistance: 0,
+      grabRadius,
+      accuracyRatio: 0,
+      accuracyTier: "precise",
+      actionType,
+      magnetBoosted: false,
+      magnifierBoosted: false,
+      handSwitched: false,
+      scoreConfirmed: true
+    };
+  }
+
+  beginStartDemoStep() {
+    if (!this.targetHold) {
+      this.prepareStartDemoClimb();
+      return;
+    }
+    const d = distance(this.currentHold, this.targetHold);
+    this.startDemoChargeTarget = clamp(
+      (d - CONFIG.minReachDistance) / Math.max(1, CONFIG.maxReachDistance - CONFIG.minReachDistance),
+      0.38,
+      0.82
+    );
+    this.startDemoPhase = "charge";
+    this.startDemoTimer = 0;
+    this.player.stopIdleRest();
+  }
+
+  advanceStartDemoHold() {
+    const oldHold = this.currentHold;
+    const nextHold = this.targetHold;
+    this.previousHold = oldHold;
+    oldHold.state = "grabbed";
+    nextHold.state = "current";
+    this.currentIndex += 1;
+    this.currentHold = nextHold;
+    this.generator.ensureHoldBuffer(this.currentIndex);
+    this.routeHolds = this.generator.routeHolds;
+    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    if (this.targetHold) {
+      this.targetHold.state = "target";
+    }
+    this.holdCount += 1;
+    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    const neutral = this.player.getNeutralBodyForHold(this.currentHold);
+    const feet = this.chooseFeetSupportsForBody("front", neutral);
+    this.player.beginBodyFollow(this.currentHold, feet.leftFoot, feet.rightFoot);
+    this.player.animDuration = this.startDemoMoveDuration;
+    this.beginStartDemoCameraFollow(neutral.y, this.startDemoMoveDuration);
+    this.startDemoPhase = "bodyFollow";
+    this.startDemoTimer = 0;
+  }
+
+  completeStartDemoCameraFollowImmediately() {
+    if (this.camera.active) {
+      this.camera.y = this.camera.targetY;
+      this.camera.startY = this.camera.targetY;
+      this.camera.elapsed = this.camera.duration;
+      this.camera.active = false;
+    }
+    this.generator.ensureHoldBuffer(this.currentIndex);
+    const removed = this.generator.removeOldHolds(this.camera.y, this.currentIndex, this.getProtectedHoldIds());
+    if (removed > 0) {
+      this.currentIndex -= removed;
+      this.routeHolds = this.generator.routeHolds;
+      this.currentHold = this.routeHolds[this.currentIndex];
+      this.targetHold = this.routeHolds[this.currentIndex + 1];
+    }
+  }
   loop(time) {
     const deltaTime = Math.min((time - this.lastTime) / 1000, 0.05);
     this.lastTime = time;
@@ -2545,7 +2770,7 @@ class Game {
     }
 
     if (this.state === STATE.START) {
-      this.player.updateReadyRest(deltaTime, this.currentHold, false);
+      this.updateStartDemoClimb(deltaTime);
       return;
     }
 
@@ -3509,6 +3734,9 @@ class Game {
     if (this.state !== STATE.START) {
       this.drawTargetHighlight(ctx);
     }
+    if (this.state !== STATE.START) {
+      this.drawPowerUpIcons(ctx);
+    }
     if (this.state === STATE.START) {
       this.drawStartScreen(ctx);
     } else {
@@ -3596,16 +3824,16 @@ class Game {
     if (themeId === "theme04") {
       return {
         ...THEME.wall,
-        base: "#ebe8df",
-        light: "#efeee8",
-        mid: "#c3d2d9",
+        base: "#d1ebe8",
+        light: "#c7d9e9",
+        mid: "#bfcbd2",
         blue: "#80a8bf",
-        deepBlue: "#ddd7c6",
+        deepBlue: "#d1ebe8",
         pink: "#8dded8",
-        seam: "rgba(96, 117, 127, 0.20)",
-        bolt: "rgba(86, 109, 121, 0.25)",
-        boltHighlight: "rgba(255, 255, 255, 0.52)",
-        texture: "rgba(86, 107, 116, 0.07)"
+        seam: "rgba(77, 112, 128, 0.18)",
+        bolt: "rgba(76, 111, 128, 0.23)",
+        boltHighlight: "rgba(255, 255, 255, 0.55)",
+        texture: "rgba(74, 108, 126, 0.065)"
       };
     }
     if (themeId === "theme05" || themeId === "theme06") {
@@ -3998,6 +4226,10 @@ class Game {
       this.drawHold(ctx, hold, isImportant, {
         alpha: isImportant ? 1 : 0.4
       });
+    }
+  }
+  drawPowerUpIcons(ctx) {
+    for (const hold of this.routeHolds) {
       if (hold.powerUp) {
         this.drawPowerUpIcon(ctx, hold);
       }
@@ -4009,8 +4241,19 @@ class Game {
       return;
     }
     const type = hold.powerUp;
+    const y = screen.y - this.getHoldVisualRadius(hold) - 18;
+    const asset = this.figmaUiAssets && this.figmaUiAssets[type];
+    if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+      const size = 34;
+      ctx.save();
+      ctx.shadowColor = "rgba(46, 108, 128, 0.24)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 3;
+      ctx.drawImage(asset.image, screen.x - size / 2, y - size / 2, size, size);
+      ctx.restore();
+      return;
+    }
     const color = POWER_UPS[type] ? POWER_UPS[type].color : "#ff3aa9";
-    const y = screen.y - this.getHoldVisualRadius(hold) - 14;
     ctx.save();
     ctx.translate(screen.x, y);
     ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
@@ -5577,52 +5820,55 @@ class Game {
     ctx.restore();
   }
 
+  drawImageAssetContain(ctx, asset, x, y, w, h) {
+    if (!asset || !asset.loaded || asset.failed || !asset.image.complete) {
+      return false;
+    }
+    const image = asset.image;
+    const scale = Math.min(w / Math.max(1, image.width), h / Math.max(1, image.height));
+    const drawW = image.width * scale;
+    const drawH = image.height * scale;
+    ctx.drawImage(image, x + (w - drawW) / 2, y + (h - drawH) / 2, drawW, drawH);
+    return true;
+  }
+
+  drawFigmaStartButton(ctx, id, assetName, x, y, w, h) {
+    this.menuButtons.push({ id, x, y, w, h });
+    const asset = this.figmaUiAssets && this.figmaUiAssets[assetName];
+    if (this.drawImageAssetContain(ctx, asset, x - 18, y - 18, w + 36, h + 36)) {
+      return;
+    }
+    ctx.save();
+    ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    this.roundRect(ctx, x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   drawStartScreen(ctx) {
     this.menuButtons = [];
     ctx.save();
     ctx.fillStyle = "rgba(181, 235, 243, 0.34)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
 
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "900 50px Arial, Helvetica, sans-serif";
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
-    ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 158);
-    ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 158);
-
-    ctx.fillStyle = "rgba(49, 95, 114, 0.78)";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
-    ctx.fillText("抓准时机，向上出手", CONFIG.logicalWidth / 2, 204);
-
-    const buttonW = 230;
-    const buttonH = 58;
-    const x = (CONFIG.logicalWidth - buttonW) / 2;
-    const startY = 314;
-    const gap = 18;
-    const items = [
-      ["play", "开始游戏"],
-      ["rank", "排行榜"],
-      ["shop", "换装商城"]
-    ];
-
-    items.forEach(([id, label], index) => {
-      const y = startY + index * (buttonH + gap);
-      this.menuButtons.push({ id, x, y, w: buttonW, h: buttonH });
-      ctx.save();
-      ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
-      ctx.shadowBlur = 12;
-      ctx.shadowOffsetY = 6;
+    const titleAsset = this.figmaUiAssets && this.figmaUiAssets.coverTitle;
+    if (!this.drawImageAssetContain(ctx, titleAsset, 51, 38, 261, 261)) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-      this.roundRect(ctx, x, y, buttonW, buttonH, 29);
-      ctx.fill();
-      ctx.restore();
+      ctx.font = "900 50px Arial, Helvetica, sans-serif";
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
+      ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 158);
+      ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 158);
+    }
 
-      ctx.fillStyle = id === "play" ? "#ff3aa9" : "#315f72";
-      ctx.font = "bold 21px Arial, Helvetica, sans-serif";
-      ctx.fillText(label, CONFIG.logicalWidth / 2, y + buttonH / 2 + 1);
-    });
+    this.drawFigmaStartButton(ctx, "play", "startButton", 73, 544, 217, 56);
+    this.drawFigmaStartButton(ctx, "shop", "outfitButton", 73, 622, 104, 56);
+    this.drawFigmaStartButton(ctx, "rank", "rankButton", 186, 622, 104, 56);
     ctx.restore();
   }
 
