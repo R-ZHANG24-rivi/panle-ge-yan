@@ -1,0 +1,331 @@
+{
+  "themeId": "theme01",
+  "sourcePackage": "theme1_hold.zip",
+  "holdCount": 16,
+  "allHoldsHaveGrip": true,
+  "allFinalCoordinateSpacesAligned": true,
+  "zeroByteFiles": [],
+  "issues": [],
+  "checks": [
+    {
+      "id": "theme01_hold_001",
+      "sourcePngSize": [
+        174,
+        184
+      ],
+      "nativeSize": [
+        174,
+        184
+      ],
+      "finalPngSize": [
+        174,
+        184
+      ],
+      "outlinePathCount": 2,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 950,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_002",
+      "sourcePngSize": [
+        158,
+        167
+      ],
+      "nativeSize": [
+        158,
+        167
+      ],
+      "finalPngSize": [
+        158,
+        167
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 1144,
+      "gripFileBytes": 155
+    },
+    {
+      "id": "theme01_hold_003",
+      "sourcePngSize": [
+        158,
+        210
+      ],
+      "nativeSize": [
+        158,
+        210
+      ],
+      "finalPngSize": [
+        158,
+        210
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 1661,
+      "gripFileBytes": 155
+    },
+    {
+      "id": "theme01_hold_004",
+      "sourcePngSize": [
+        95,
+        157
+      ],
+      "nativeSize": [
+        95,
+        157
+      ],
+      "finalPngSize": [
+        95,
+        157
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 1486,
+      "gripFileBytes": 152
+    },
+    {
+      "id": "theme01_hold_005",
+      "sourcePngSize": [
+        250,
+        321
+      ],
+      "nativeSize": [
+        250,
+        321
+      ],
+      "finalPngSize": [
+        250,
+        321
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 340,
+      "gripFileBytes": 156
+    },
+    {
+      "id": "theme01_hold_006",
+      "sourcePngSize": [
+        126,
+        158
+      ],
+      "nativeSize": [
+        126,
+        158
+      ],
+      "finalPngSize": [
+        126,
+        158
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 408,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_007",
+      "sourcePngSize": [
+        146,
+        149
+      ],
+      "nativeSize": [
+        146,
+        149
+      ],
+      "finalPngSize": [
+        146,
+        149
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 330,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_008",
+      "sourcePngSize": [
+        210,
+        165
+      ],
+      "nativeSize": [
+        210,
+        166
+      ],
+      "finalPngSize": [
+        210,
+        166
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 244,
+      "gripFileBytes": 160
+    },
+    {
+      "id": "theme01_hold_009",
+      "sourcePngSize": [
+        113,
+        146
+      ],
+      "nativeSize": [
+        113,
+        146
+      ],
+      "finalPngSize": [
+        113,
+        146
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 437,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_010",
+      "sourcePngSize": [
+        181,
+        224
+      ],
+      "nativeSize": [
+        181,
+        224
+      ],
+      "finalPngSize": [
+        181,
+        224
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 272,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_011",
+      "sourcePngSize": [
+        236,
+        220
+      ],
+      "nativeSize": [
+        236,
+        220
+      ],
+      "finalPngSize": [
+        236,
+        220
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 292,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_012",
+      "sourcePngSize": [
+        87,
+        96
+      ],
+      "nativeSize": [
+        88,
+        96
+      ],
+      "finalPngSize": [
+        88,
+        96
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 409,
+      "gripFileBytes": 153
+    },
+    {
+      "id": "theme01_hold_013",
+      "sourcePngSize": [
+        294,
+        286
+      ],
+      "nativeSize": [
+        294,
+        286
+      ],
+      "finalPngSize": [
+        294,
+        286
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 363,
+      "gripFileBytes": 155
+    },
+    {
+      "id": "theme01_hold_014",
+      "sourcePngSize": [
+        306,
+        261
+      ],
+      "nativeSize": [
+        306,
+        261
+      ],
+      "finalPngSize": [
+        306,
+        261
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 349,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme01_hold_015",
+      "sourcePngSize": [
+        195,
+        200
+      ],
+      "nativeSize": [
+        196,
+        200
+      ],
+      "finalPngSize": [
+        196,
+        200
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 344,
+      "gripFileBytes": 156
+    },
+    {
+      "id": "theme01_hold_016",
+      "sourcePngSize": [
+        91,
+        107
+      ],
+      "nativeSize": [
+        100,
+        107
+      ],
+      "finalPngSize": [
+        100,
+        107
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 303,
+      "gripFileBytes": 157
+    }
+  ]
+}

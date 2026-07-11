@@ -1,0 +1,373 @@
+{
+  "themeId": "theme05",
+  "sourcePackage": "theme5_hold.zip",
+  "holdCount": 17,
+  "presentHoldNumbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    16,
+    17,
+    18
+  ],
+  "missingHoldNumbersWithin001To018": [
+    15
+  ],
+  "allHoldsHaveGrip": true,
+  "allFinalCoordinateSpacesAligned": true,
+  "zeroByteFiles": [],
+  "issues": [],
+  "checks": [
+    {
+      "id": "theme05_hold_001",
+      "sourcePngSize": [
+        122,
+        122
+      ],
+      "nativeSize": [
+        122,
+        122
+      ],
+      "finalPngSize": [
+        122,
+        122
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 319,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_002",
+      "sourcePngSize": [
+        70,
+        74
+      ],
+      "nativeSize": [
+        70,
+        74
+      ],
+      "finalPngSize": [
+        70,
+        74
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 263,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme05_hold_003",
+      "sourcePngSize": [
+        115,
+        120
+      ],
+      "nativeSize": [
+        115,
+        120
+      ],
+      "finalPngSize": [
+        115,
+        120
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 321,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_004",
+      "sourcePngSize": [
+        67,
+        88
+      ],
+      "nativeSize": [
+        67,
+        88
+      ],
+      "finalPngSize": [
+        67,
+        88
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 286,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme05_hold_005",
+      "sourcePngSize": [
+        121,
+        122
+      ],
+      "nativeSize": [
+        121,
+        122
+      ],
+      "finalPngSize": [
+        121,
+        122
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 329,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_006",
+      "sourcePngSize": [
+        138,
+        181
+      ],
+      "nativeSize": [
+        138,
+        181
+      ],
+      "finalPngSize": [
+        138,
+        181
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 239,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_007",
+      "sourcePngSize": [
+        112,
+        110
+      ],
+      "nativeSize": [
+        112,
+        110
+      ],
+      "finalPngSize": [
+        112,
+        110
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 328,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_008",
+      "sourcePngSize": [
+        49,
+        107
+      ],
+      "nativeSize": [
+        49,
+        107
+      ],
+      "finalPngSize": [
+        49,
+        107
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 244,
+      "gripFileBytes": 152
+    },
+    {
+      "id": "theme05_hold_009",
+      "sourcePngSize": [
+        184,
+        142
+      ],
+      "nativeSize": [
+        184,
+        142
+      ],
+      "finalPngSize": [
+        184,
+        142
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 307,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_010",
+      "sourcePngSize": [
+        75,
+        76
+      ],
+      "nativeSize": [
+        75,
+        76
+      ],
+      "finalPngSize": [
+        75,
+        76
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 262,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme05_hold_011",
+      "sourcePngSize": [
+        115,
+        133
+      ],
+      "nativeSize": [
+        115,
+        133
+      ],
+      "finalPngSize": [
+        115,
+        133
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 290,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme05_hold_012",
+      "sourcePngSize": [
+        57,
+        210
+      ],
+      "nativeSize": [
+        57,
+        210
+      ],
+      "finalPngSize": [
+        57,
+        210
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 227,
+      "gripFileBytes": 153
+    },
+    {
+      "id": "theme05_hold_013",
+      "sourcePngSize": [
+        98,
+        291
+      ],
+      "nativeSize": [
+        98,
+        291
+      ],
+      "finalPngSize": [
+        98,
+        291
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 244,
+      "gripFileBytes": 153
+    },
+    {
+      "id": "theme05_hold_014",
+      "sourcePngSize": [
+        87,
+        283
+      ],
+      "nativeSize": [
+        87,
+        283
+      ],
+      "finalPngSize": [
+        87,
+        283
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 237,
+      "gripFileBytes": 153
+    },
+    {
+      "id": "theme05_hold_016",
+      "sourcePngSize": [
+        39,
+        39
+      ],
+      "nativeSize": [
+        39,
+        39
+      ],
+      "finalPngSize": [
+        39,
+        39
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 255,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme05_hold_017",
+      "sourcePngSize": [
+        233,
+        184
+      ],
+      "nativeSize": [
+        233,
+        184
+      ],
+      "finalPngSize": [
+        233,
+        184
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 255,
+      "gripFileBytes": 156
+    },
+    {
+      "id": "theme05_hold_018",
+      "sourcePngSize": [
+        43,
+        34
+      ],
+      "nativeSize": [
+        43,
+        34
+      ],
+      "finalPngSize": [
+        43,
+        34
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 238,
+      "gripFileBytes": 150
+    }
+  ]
+}

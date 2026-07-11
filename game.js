@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const DEBUG = false;
 
@@ -192,8 +192,14 @@ const THEME = {
 
 const HOLD_SHAPES = ["jug", "blob", "triangle", "sloper", "pinch", "smallCrimp", "volume"];
 
-const THEME01_HOLD_ASSET_BASE = "assets/theme01_holds";
-const THEME01_HOLD_MANIFEST_FILE = `${THEME01_HOLD_ASSET_BASE}/theme01_holds_manifest.json`;
+const HOLD_THEME_ASSET_SETS = [
+  { id: "theme01", basePath: "assets/hold_themes/theme01", manifestFile: "assets/hold_themes/theme01/theme01_holds_manifest.json" },
+  { id: "theme02", basePath: "assets/hold_themes/theme02", manifestFile: "assets/hold_themes/theme02/theme02_holds_manifest.json" },
+  { id: "theme03", basePath: "assets/hold_themes/theme03", manifestFile: "assets/hold_themes/theme03/theme03_holds_manifest.json" },
+  { id: "theme04", basePath: "assets/hold_themes/theme04", manifestFile: "assets/hold_themes/theme04/theme04_holds_manifest.json" },
+  { id: "theme05", basePath: "assets/hold_themes/theme05", manifestFile: "assets/hold_themes/theme05/theme05_holds_manifest.json" },
+  { id: "theme06", basePath: "assets/hold_themes/theme06", manifestFile: "assets/hold_themes/theme06/theme06_holds_manifest.json" }
+];
 const ROUTE_HOLD_ASSET_BASE = "assets/pink_climbing_holds_complete_assets/individual_png";
 const SUPPORT_HOLD_ASSET_BASE = "assets/light_purple_climbing_holds_complete_assets/individual_png";
 const ROUTE_HOLD_ASSET_FILES = Array.from(
@@ -269,7 +275,10 @@ const FEEDBACK_ASSET_FILES = {
 
 const AUDIO_FILES = {
   bgm: "assets/audio/bgm1.mp3?v=20260710-grip-glide",
-  grabSuccess: "assets/audio/grab-success.ogg"
+  grabSuccess: "assets/audio/grab-success.ogg?v=20260711-bubble-ogg-1",
+  charge: "assets/audio/charge.mp3?v=20260711-charge-1",
+  powerUp: "assets/audio/power-up.mp3?v=20260711-powerup-1",
+  miss: "assets/audio/miss.ogg?v=20260711-miss-1"
 };
 
 const DEFAULT_OUTFIT = {
@@ -523,6 +532,47 @@ function parseOutlineSvg(svgText, nativeSize, gripPx, renderScale) {
   }));
 }
 
+function parseGripSvg(svgText, nativeSize) {
+  if (!svgText) {
+    return null;
+  }
+  const width = parseSvgNumber(svgText, "width") || nativeSize.width;
+  const height = parseSvgNumber(svgText, "height") || nativeSize.height;
+  if (width < nativeSize.width * 0.5 || height < nativeSize.height * 0.5) {
+    return null;
+  }
+  const circleMatch = svgText.match(/<[^>]*circle[^>]*>/);
+  if (!circleMatch) {
+    return null;
+  }
+  const circleTag = circleMatch[0];
+  const cxMatch = circleTag.match(/\bcx="([^"]+)"/);
+  const cyMatch = circleTag.match(/\bcy="([^"]+)"/);
+  if (!cxMatch || !cyMatch) {
+    return null;
+  }
+  let x = Number(cxMatch[1]);
+  let y = Number(cyMatch[1]);
+  const scaleMatch = svgText.match(/transform="scale\(([-0-9.]+)(?:[ ,]+([-0-9.]+))?\)"/);
+  if (scaleMatch) {
+    const sx = Number(scaleMatch[1]);
+    const sy = Number(scaleMatch[2] || scaleMatch[1]);
+    if (Number.isFinite(sx)) {
+      x *= sx;
+    }
+    if (Number.isFinite(sy)) {
+      y *= sy;
+    }
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return null;
+  }
+  return {
+    x: clamp(x / Math.max(1, width), 0, 1),
+    y: clamp(y / Math.max(1, height), 0, 1),
+    type: "primary"
+  };
+}
 function formatMeters(value) {
   return `${value.toFixed(1)} m`;
 }
@@ -704,30 +754,36 @@ class Camera {
 }
 
 class HoldAssetManager {
-  constructor(basePath, manifestFile) {
-    this.basePath = basePath;
-    this.manifestFile = manifestFile;
-    this.themeId = null;
+  constructor(themeSets) {
+    this.themeSets = Array.isArray(themeSets) ? themeSets : [];
+    this.themeAssets = new Map();
+    this.themeAssetsById = new Map();
+    this.currentThemeId = null;
     this.assets = [];
     this.assetsById = new Map();
     this.ready = false;
     this.failed = false;
-    this.readyPromise = this.loadTheme();
+    this.readyPromise = this.loadThemes();
   }
 
-  async loadTheme() {
+  async loadThemes() {
     try {
-      const response = await fetch(this.manifestFile);
-      if (!response.ok) {
-        throw new Error(`Failed to load hold manifest: ${response.status}`);
+      const loadedThemes = await Promise.all(this.themeSets.map((theme) => this.loadTheme(theme)));
+      const validThemes = loadedThemes.filter((theme) => theme && theme.assets.length > 0);
+      for (const theme of validThemes) {
+        this.themeAssets.set(theme.id, theme.assets);
+        this.themeAssetsById.set(theme.id, new Map(theme.assets.map((asset) => [asset.id, asset])));
       }
-      const manifest = await response.json();
-      this.themeId = manifest.themeId || "theme01";
-      const loadedAssets = await Promise.all((manifest.holds || []).map((entry, index) => this.loadHoldAsset(entry, index)));
-      this.assets = loadedAssets.filter(Boolean);
-      this.assetsById = new Map(this.assets.map((asset) => [asset.id, asset]));
-      this.ready = this.assets.length > 0;
+      this.ready = validThemes.length > 0;
       this.failed = !this.ready;
+      if (this.ready) {
+        const forcedTheme = this.getForcedThemeId();
+        if (forcedTheme && this.themeAssets.has(forcedTheme)) {
+          this.useTheme(forcedTheme);
+        } else {
+          this.selectRandomTheme(false);
+        }
+      }
       return this.ready;
     } catch (error) {
       console.warn("Theme hold assets unavailable", error);
@@ -737,37 +793,79 @@ class HoldAssetManager {
     }
   }
 
-  async loadHoldAsset(entry, index) {
+  getForcedThemeId() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      const value = params.get("forceTheme");
+      return value && /^theme\d+$/.test(value) ? value : null;
+    } catch (error) {
+      return null;
+    }
+  }
+  async loadTheme(theme) {
+    const response = await fetch(theme.manifestFile);
+    if (!response.ok) {
+      throw new Error(`Failed to load hold manifest: ${response.status}`);
+    }
+    const manifest = await response.json();
+    const themeId = manifest.themeId || theme.id;
+    const themeInfo = { ...theme, id: themeId };
+    const loadedAssets = await Promise.all((manifest.holds || []).map((entry, index) => this.loadHoldAsset(themeInfo, entry, index)));
+    return {
+      id: themeId,
+      assets: loadedAssets.filter(Boolean)
+    };
+  }
+
+  async loadHoldAsset(theme, entry, index) {
     const nativeSize = {
       width: Math.max(1, Number(entry.nativeSize && entry.nativeSize.width) || 1),
       height: Math.max(1, Number(entry.nativeSize && entry.nativeSize.height) || 1)
     };
-    // 当前 theme01 manifest 的 grip 点集中在左上角标记点附近。
-    // 先用图片中心作为可抓点，保持与原游戏“岩点中心判定”的玩法一致。
-    const primaryGrip = { x: 0.5, y: 0.5, type: "primary" };
+    const manifestGrip = Array.isArray(entry.grips) && entry.grips.length > 0
+      ? entry.grips[0]
+      : null;
+    let gripFromSvg = null;
+    if (entry.grip) {
+      try {
+        const gripResponse = await fetch(`${theme.basePath}/${entry.grip}`);
+        const gripText = gripResponse.ok ? await gripResponse.text() : "";
+        gripFromSvg = parseGripSvg(gripText, nativeSize);
+      } catch (error) {
+        gripFromSvg = null;
+      }
+    }
+    const primaryGrip = gripFromSvg || {
+      x: clamp(Number(manifestGrip && manifestGrip.x) || 0.5, 0, 1),
+      y: clamp(Number(manifestGrip && manifestGrip.y) || 0.5, 0, 1),
+      type: manifestGrip && manifestGrip.type || "primary"
+    };
     const gripPx = {
       x: clamp(Number(primaryGrip.x) || 0.5, 0, 1) * nativeSize.width,
       y: clamp(Number(primaryGrip.y) || 0.5, 0, 1) * nativeSize.height
     };
-    const src = `${this.basePath}/${entry.image}`;
+    const src = `${theme.basePath}/${entry.image}`;
     const image = new Image();
+    const manifestGrips = (entry.grips || []).map((grip) => ({
+      x: clamp(Number(grip.x) || 0.5, 0, 1),
+      y: clamp(Number(grip.y) || 0.5, 0, 1),
+      type: grip.type || "primary"
+    }));
     const asset = {
-      id: entry.id,
+      id: `${theme.id}:${entry.id}`,
+      sourceId: entry.id,
       src,
       image,
       loaded: false,
       failed: false,
       index,
-      group: "theme01",
+      group: theme.id,
       nativeSize,
       renderScale: CONFIG.themeHoldScale,
       gripPx,
-      grips: [primaryGrip],
-      manifestGrips: (entry.grips || []).map((grip) => ({
-        x: clamp(Number(grip.x) || 0.5, 0, 1),
-        y: clamp(Number(grip.y) || 0.5, 0, 1),
-        type: grip.type || "primary"
-      }))
+      grips: manifestGrips.length > 0 ? manifestGrips : [primaryGrip],
+      primaryGrip,
+      manifestGrips
     };
     image.onload = () => {
       asset.loaded = true;
@@ -779,7 +877,7 @@ class HoldAssetManager {
 
     let outlineText = "";
     try {
-      const outlineResponse = await fetch(`${this.basePath}/${entry.outline}`);
+      const outlineResponse = await fetch(`${theme.basePath}/${entry.outline}`);
       outlineText = outlineResponse.ok ? await outlineResponse.text() : "";
     } catch (error) {
       outlineText = "";
@@ -795,6 +893,31 @@ class HoldAssetManager {
     asset.radius = Math.max(10, Math.min(34, Math.max(asset.imageDraw.width, asset.imageDraw.height) * 0.22));
     await waitForImageAsset(asset);
     return asset;
+  }
+
+  selectRandomTheme(requireDifferent = false) {
+    const themeIds = Array.from(this.themeAssets.keys());
+    if (themeIds.length === 0) {
+      this.currentThemeId = null;
+      this.assets = [];
+      this.assetsById = new Map();
+      return null;
+    }
+    let candidates = themeIds;
+    if (requireDifferent && themeIds.length > 1 && this.currentThemeId) {
+      candidates = themeIds.filter((id) => id !== this.currentThemeId);
+    }
+    const nextThemeId = candidates[Math.floor(Math.random() * candidates.length)] || themeIds[0];
+    this.useTheme(nextThemeId);
+    return this.currentThemeId;
+  }
+
+  useTheme(themeId) {
+    const assets = this.themeAssets.get(themeId) || [];
+    this.currentThemeId = themeId;
+    this.assets = assets;
+    this.assetsById = this.themeAssetsById.get(themeId) || new Map();
+    return assets.length > 0;
   }
 
   getRandomAsset(seed = Math.random()) {
@@ -816,7 +939,6 @@ class HoldAssetManager {
     return Boolean(asset && asset.loaded && !asset.failed && asset.image.complete);
   }
 }
-
 class PlayerAssetManager {
   constructor(files) {
     this.assets = {};
@@ -1814,21 +1936,34 @@ class InputController {
   }
 }
 
-class GameAudio {
+class AudioManager {
   constructor(files) {
     this.files = files;
     this.enabled = true;
     this.unlocked = false;
+    this.context = null;
+    this.buffers = new Map();
+    this.reverseBuffers = new Map();
+    this.loadingPromises = new Map();
+    this.failedSfx = new Set();
+    this.loopingSfx = new Map();
+    this.sfxFiles = {
+      grabSuccess: files.grabSuccess,
+      charge: files.charge,
+      powerUp: files.powerUp,
+      miss: files.miss
+    };
+    this.grabRankSettings = {
+      lucky: { playbackRate: 0.84, volume: 0.75 },
+      good: { playbackRate: 1, volume: 0.8 },
+      perfect: { playbackRate: 1.18, volume: 0.9 }
+    };
     this.bgm = this.createAudio(files.bgm, {
       loop: true,
-      volume: 0.256,
+      volume: 0.05632,
       preload: "auto"
     });
-    this.grabSuccess = this.createAudio(files.grabSuccess, {
-      loop: false,
-      volume: 0.72,
-      preload: "auto"
-    });
+    this.initContext();
   }
 
   createAudio(src, options = {}) {
@@ -1840,19 +1975,108 @@ class GameAudio {
     return audio;
   }
 
+  initContext() {
+    if (this.context) {
+      return this.context;
+    }
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      return null;
+    }
+    try {
+      this.context = new AudioContextClass();
+    } catch (error) {
+      this.context = null;
+    }
+    return this.context;
+  }
+
+  preload() {
+    return Promise.all([
+      this.preloadSfx("grabSuccess"),
+      this.preloadSfx("charge"),
+      this.preloadSfx("powerUp"),
+      this.preloadSfx("miss")
+    ]).then((results) => results.some(Boolean));
+  }
+
+  createReversedBuffer(buffer) {
+    const context = this.initContext();
+    if (!context || !buffer) {
+      return null;
+    }
+    try {
+      const reversed = context.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        const sourceData = buffer.getChannelData(channel);
+        const targetData = reversed.getChannelData(channel);
+        for (let i = 0, j = sourceData.length - 1; i < sourceData.length; i += 1, j -= 1) {
+          targetData[i] = sourceData[j];
+        }
+      }
+      return reversed;
+    } catch (error) {
+      return null;
+    }
+  }
+  preloadSfx(name) {
+    const src = this.sfxFiles[name];
+    if (!src || this.buffers.has(name)) {
+      return Promise.resolve(this.buffers.has(name));
+    }
+    if (this.loadingPromises.has(name)) {
+      return this.loadingPromises.get(name);
+    }
+    const context = this.initContext();
+    if (!context || !window.fetch) {
+      this.failedSfx.add(name);
+      return Promise.resolve(false);
+    }
+    const loadPromise = fetch(src)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Audio load failed: ${response.status}`);
+        }
+        return response.arrayBuffer();
+      })
+      .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
+      .then((buffer) => {
+        this.buffers.set(name, buffer);
+        if (name === "charge") {
+          const reversed = this.createReversedBuffer(buffer);
+          if (reversed) {
+            this.reverseBuffers.set(name, reversed);
+          }
+        }
+        this.failedSfx.delete(name);
+        return true;
+      })
+      .catch(() => {
+        this.failedSfx.add(name);
+        return false;
+      });
+    this.loadingPromises.set(name, loadPromise);
+    return loadPromise;
+  }
+
   unlock() {
     if (this.unlocked || !this.enabled) {
       return;
     }
     this.unlocked = true;
+    const context = this.initContext();
+    if (context && context.state === "suspended") {
+      context.resume().catch(() => {});
+    }
+    this.preload();
     this.playBgm();
   }
 
   setMuted(muted) {
     this.enabled = !muted;
     this.bgm.muted = muted;
-    this.grabSuccess.muted = muted;
     if (muted) {
+      this.stopCharge();
       this.bgm.pause();
       return;
     }
@@ -1870,20 +2094,130 @@ class GameAudio {
     }
   }
 
-  playGrabSuccess() {
+  playSfx(name, options = {}) {
     if (!this.enabled || !this.unlocked) {
-      return;
+      return false;
+    }
+    const context = this.initContext();
+    const buffer = this.buffers.get(name);
+    if (!context || !buffer) {
+      if (!this.failedSfx.has(name)) {
+        this.preloadSfx(name);
+      }
+      return false;
     }
     try {
-      this.grabSuccess.currentTime = 0;
-      const playPromise = this.grabSuccess.play();
-      if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch(() => {});
+      const source = context.createBufferSource();
+      const gain = context.createGain();
+      source.buffer = buffer;
+      source.playbackRate.value = options.playbackRate ?? 1;
+      gain.gain.value = options.volume ?? 1;
+      source.connect(gain);
+      gain.connect(context.destination);
+      source.onended = () => {
+        try {
+          source.disconnect();
+          gain.disconnect();
+        } catch (error) {}
+      };
+      source.start(0);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  startLoopSfx(name, options = {}) {
+    const mode = options.mode || "forward";
+    if (!this.enabled || !this.unlocked) {
+      return false;
+    }
+    const active = this.loopingSfx.get(name);
+    if (active && active.mode === mode) {
+      return true;
+    }
+    if (active) {
+      this.stopLoopSfx(name);
+    }
+    const context = this.initContext();
+    const buffer = mode === "reverse" && this.reverseBuffers.has(name)
+      ? this.reverseBuffers.get(name)
+      : this.buffers.get(name);
+    if (!context || !buffer) {
+      if (!this.failedSfx.has(name)) {
+        this.preloadSfx(name);
       }
+      return false;
+    }
+    try {
+      const source = context.createBufferSource();
+      const gain = context.createGain();
+      source.buffer = buffer;
+      source.loop = true;
+      source.playbackRate.value = options.playbackRate ?? 1;
+      gain.gain.value = options.volume ?? 0.665;
+      source.connect(gain);
+      gain.connect(context.destination);
+      source.start(0);
+      this.loopingSfx.set(name, { source, gain, mode });
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+  stopLoopSfx(name) {
+    const active = this.loopingSfx.get(name);
+    if (!active) {
+      return;
+    }
+    this.loopingSfx.delete(name);
+    try {
+      active.source.stop(0);
+      active.source.disconnect();
+      active.gain.disconnect();
     } catch (error) {}
   }
-}
 
+  playCharge(direction = 1) {
+    return this.startLoopSfx("charge", {
+      mode: direction < 0 ? "reverse" : "forward",
+      playbackRate: 1,
+      volume: 0.665
+    });
+  }
+  stopCharge() {
+    this.stopLoopSfx("charge");
+  }
+  playMiss() {
+    this.playSfx("miss", {
+      playbackRate: 1,
+      volume: 0.9
+    });
+  }
+
+  playPowerUp() {
+    this.playSfx("powerUp", {
+      playbackRate: 1,
+      volume: 0.85
+    });
+  }
+
+  playGrabRank(rank, comboCount = 0) {
+    const normalizedRank = rank === "precise" ? "perfect" : rank === "risky" ? "lucky" : rank;
+    const base = this.grabRankSettings[normalizedRank] || this.grabRankSettings.good;
+    const comboPitchBonus = Math.min(Math.max(comboCount || 0, 0), 6) * 0.04;
+    const playbackRate = Math.min(1.35, base.playbackRate + comboPitchBonus);
+    this.playSfx("grabSuccess", {
+      playbackRate,
+      volume: base.volume
+    });
+    this.playPerfectAccent(normalizedRank, comboCount);
+  }
+
+  playPerfectAccent(rank, comboCount = 0) {
+    // Future hook: layer a short ding over perfect or high-combo grabs.
+  }
+}
 function waitForImageAsset(asset) {
   if (!asset || !asset.image) {
     return Promise.resolve(false);
@@ -1948,13 +2282,13 @@ class Game {
     this.scoreManager = new ScoreManager();
     this.camera = new Camera();
     this.player = new Player();
-    this.holdAssets = new HoldAssetManager(THEME01_HOLD_ASSET_BASE, THEME01_HOLD_MANIFEST_FILE);
+    this.holdAssets = new HoldAssetManager(HOLD_THEME_ASSET_SETS);
     this.generator = new HoldGenerator(this.holdAssets);
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
     this.outfitAssetCache = new Map();
     this.uiIconAssets = this.loadUiIconAssets();
     this.feedbackAssets = this.loadFeedbackAssets();
-    this.audio = new GameAudio(AUDIO_FILES);
+    this.audio = new AudioManager(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
     this.selectedOutfitPart = "hair";
@@ -2111,7 +2445,7 @@ class Game {
       () => this.holdAssets.readyPromise,
       ...imageAssets.map((asset) => () => waitForImageAsset(asset)),
       () => waitForAudioAsset(this.audio.bgm),
-      () => waitForAudioAsset(this.audio.grabSuccess)
+      () => this.audio.preload()
     ];
     this.loadingTotal = Math.max(1, tasks.length);
     this.loadingLoaded = 0;
@@ -2132,8 +2466,11 @@ class Game {
     });
   }
 
-  resetGame() {
+  resetGame(options = {}) {
     this.state = STATE.RESTARTING;
+    if (options.switchTheme) {
+      this.holdAssets.selectRandomTheme(true);
+    }
     this.charge = 0;
     this.chargeDirection = 1;
     this.score = 0;
@@ -2322,7 +2659,7 @@ class Game {
       return;
     }
     if (this.state === STATE.GAME_OVER || this.canRestartEndedRound()) {
-      this.resetGame();
+      this.resetGame({ switchTheme: true });
       return;
     }
     if (this.canInterruptForNextMove()) {
@@ -2382,7 +2719,7 @@ class Game {
       return;
     }
     if (id === "restart") {
-      this.resetGame();
+      this.resetGame({ switchTheme: true });
       this.showToast("已重新开始");
       return;
     }
@@ -2470,9 +2807,11 @@ class Game {
     this.chargeDirection = 1;
     this.player.stopIdleRest();
     this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
+    this.audio.playCharge(this.chargeDirection);
     this.state = STATE.CHARGING;
   }
   updateCharge(deltaTime) {
+    const previousDirection = this.chargeDirection;
     this.charge += this.chargeDirection * (deltaTime / CONFIG.chargeDuration);
     if (this.charge >= 1) {
       this.charge = 2 - this.charge;
@@ -2481,18 +2820,22 @@ class Game {
       this.charge = -this.charge;
       this.chargeDirection = 1;
     }
+    if (this.chargeDirection !== previousDirection) {
+      this.audio.playCharge(this.chargeDirection);
+    }
     this.charge = clamp(this.charge, 0, 1);
   }
-
   handlePressEnd() {
     if (this.state !== STATE.CHARGING) {
       return;
     }
+    this.audio.stopCharge();
     this.startAttempt();
   }
 
   handlePressCancel() {
     if (this.state === STATE.CHARGING) {
+      this.audio.stopCharge();
       this.charge = 0;
       this.chargeDirection = 1;
       this.player.stopIdleRest();
@@ -2564,6 +2907,7 @@ class Game {
     }
     const duration = CONFIG.powerUpDurations[type] || 3;
     this.powerUps[type] = duration;
+    this.audio.playPowerUp();
     this.showToast(`${POWER_UPS[type].label}生效 ${duration} 秒`);
   }
 
@@ -2662,7 +3006,7 @@ class Game {
     }
     this.pendingAttempt.scoreConfirmed = true;
     this.applyAccuracyScore(this.animationResult || this.pendingAttempt);
-    this.audio.playGrabSuccess();
+    this.audio.playGrabRank(this.feedback.tier, this.feedback.combo);
     const grabbedPowerUp = this.targetHold.powerUp;
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
@@ -2688,6 +3032,7 @@ class Game {
   }
 
   handleFailedGrab(result) {
+    this.audio.playMiss();
     this.failureReason = result === "tooStrong" ? "力量过大" : "力量不足";
     this.preciseCombo = 0;
     this.livesRemaining = Math.max(0, this.livesRemaining - 1);
@@ -3246,12 +3591,51 @@ class Game {
     ctx.restore();
   }
 
+  getWallTheme() {
+    const themeId = this.holdAssets && this.holdAssets.currentThemeId;
+    if (themeId === "theme04") {
+      return {
+        ...THEME.wall,
+        base: "#ebe8df",
+        light: "#efeee8",
+        mid: "#c3d2d9",
+        blue: "#80a8bf",
+        deepBlue: "#ddd7c6",
+        pink: "#8dded8",
+        seam: "rgba(96, 117, 127, 0.20)",
+        bolt: "rgba(86, 109, 121, 0.25)",
+        boltHighlight: "rgba(255, 255, 255, 0.52)",
+        texture: "rgba(86, 107, 116, 0.07)"
+      };
+    }
+    if (themeId === "theme05" || themeId === "theme06") {
+      return {
+        ...THEME.wall,
+        base: "#fbf8ef",
+        light: "#fffaf0",
+        mid: "#f2ead4",
+        blue: "#f3dfa6",
+        deepBlue: "#fff8ea",
+        pink: "#d4bde9",
+        seam: "rgba(196, 166, 96, 0.18)",
+        bolt: "rgba(177, 148, 91, 0.24)",
+        boltHighlight: "rgba(255, 255, 255, 0.60)",
+        texture: "rgba(170, 139, 78, 0.06)"
+      };
+    }
+    return {
+      ...THEME.wall,
+      boltHighlight: "rgba(255, 255, 255, 0.58)",
+      texture: "rgba(86, 136, 154, 0.10)"
+    };
+  }
   drawWall(ctx) {
-    ctx.fillStyle = THEME.wall.base;
+    const wallTheme = this.getWallTheme();
+    ctx.fillStyle = wallTheme.base;
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-    this.drawWallPanels(ctx);
-    this.drawWallBoltHoles(ctx);
-    this.drawWallTexture(ctx);
+    this.drawWallPanels(ctx, wallTheme);
+    this.drawWallBoltHoles(ctx, wallTheme);
+    this.drawWallTexture(ctx, wallTheme);
     this.drawHeightScale(ctx);
   }
 
@@ -3296,7 +3680,7 @@ class Game {
     ctx.restore();
   }
 
-  drawWallPanels(ctx) {
+  drawWallPanels(ctx, wallTheme = this.getWallTheme()) {
     const segmentHeight = 520;
     const startIndex = Math.floor(this.camera.y / segmentHeight) - 2;
     const endIndex = Math.floor((this.camera.y + CONFIG.logicalHeight) / segmentHeight) + 2;
@@ -3306,7 +3690,7 @@ class Game {
       const flip = index % 2 === 0 ? 1 : -1;
       const shift = (hashUnit(index) - 0.5) * 42;
 
-      ctx.fillStyle = index % 3 === 0 ? THEME.wall.light : THEME.wall.mid;
+      ctx.fillStyle = index % 3 === 0 ? wallTheme.light : wallTheme.mid;
       ctx.beginPath();
       ctx.moveTo(0, y + 10);
       ctx.lineTo(CONFIG.logicalWidth, y - 28);
@@ -3315,7 +3699,7 @@ class Game {
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = THEME.wall.blue;
+      ctx.fillStyle = wallTheme.blue;
       ctx.beginPath();
       ctx.moveTo(flip > 0 ? -60 : CONFIG.logicalWidth + 60, y + 40);
       ctx.lineTo(CONFIG.logicalWidth * (flip > 0 ? 0.34 : 0.66) + shift, y + segmentHeight * 0.08);
@@ -3324,7 +3708,7 @@ class Game {
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = index % 4 === 0 ? THEME.wall.deepBlue : THEME.wall.light;
+      ctx.fillStyle = index % 4 === 0 ? wallTheme.deepBlue : wallTheme.light;
       ctx.beginPath();
       ctx.moveTo(CONFIG.logicalWidth * (flip > 0 ? 0.74 : 0.26) + shift, y - 16);
       ctx.lineTo(CONFIG.logicalWidth + (flip > 0 ? 48 : -48), y + segmentHeight * 0.22);
@@ -3333,14 +3717,14 @@ class Game {
       ctx.closePath();
       ctx.fill();
 
-      ctx.strokeStyle = THEME.wall.seam;
+      ctx.strokeStyle = wallTheme.seam;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, y + segmentHeight * 0.92);
       ctx.lineTo(CONFIG.logicalWidth, y + segmentHeight * 0.58);
       ctx.stroke();
 
-      ctx.strokeStyle = THEME.wall.pink;
+      ctx.strokeStyle = wallTheme.pink;
       ctx.lineWidth = 7;
       ctx.globalAlpha = 0.62;
       ctx.beginPath();
@@ -3351,7 +3735,7 @@ class Game {
     }
   }
 
-  drawWallBoltHoles(ctx) {
+  drawWallBoltHoles(ctx, wallTheme = this.getWallTheme()) {
     const spacingX = 68;
     const spacingY = 70;
     const startRow = Math.floor((this.camera.y - 100) / spacingY);
@@ -3367,19 +3751,19 @@ class Game {
         if (x < 12 || x > CONFIG.logicalWidth - 12) {
           continue;
         }
-        ctx.fillStyle = "rgba(130, 160, 172, 0.26)";
+        ctx.fillStyle = wallTheme.bolt || "rgba(130, 160, 172, 0.26)";
         ctx.beginPath();
         ctx.arc(x, y + jitterY, 2.2, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
+        ctx.strokeStyle = wallTheme.boltHighlight || "rgba(255, 255, 255, 0.58)";
         ctx.lineWidth = 0.8;
         ctx.stroke();
       }
     }
   }
 
-  drawWallTexture(ctx) {
-    ctx.fillStyle = "rgba(86, 136, 154, 0.10)";
+  drawWallTexture(ctx, wallTheme = this.getWallTheme()) {
+    ctx.fillStyle = wallTheme.texture || "rgba(86, 136, 154, 0.10)";
     const spacing = 118;
     const start = Math.floor((this.camera.y - 80) / spacing);
     const end = Math.ceil((this.camera.y + CONFIG.logicalHeight + 80) / spacing);
@@ -3447,7 +3831,6 @@ class Game {
     const visual = this.getHoldVisual(hold, options);
     ctx.save();
     ctx.globalAlpha *= options.alpha ?? 1;
-    ctx.filter = options.brightness ? `brightness(${options.brightness})` : "none";
     ctx.translate(screen.x, screen.y);
     ctx.rotate(visual.angle);
 
@@ -3482,10 +3865,10 @@ class Game {
       ctx.shadowColor = "rgba(255, 255, 214, 0.58)";
       ctx.shadowBlur = 8;
     } else {
-      ctx.shadowColor = "rgba(62, 75, 86, 0.20)";
-      ctx.shadowBlur = 4;
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
     }
-    ctx.shadowOffsetY = 2;
+    ctx.shadowOffsetY = isContact || hold.state === "target" ? 2 : 0;
     ctx.drawImage(
       visual.asset.image,
       visual.imageDrawX,
@@ -3603,8 +3986,7 @@ class Game {
       }
       this.drawHold(ctx, hold, isContact, {
         useRouteAsset: hold.isFootRoute,
-        alpha: isContact ? 1 : 0.4,
-        brightness: isContact ? 1 : 1.3
+        alpha: isContact ? 1 : 0.4
       });
     }
   }
@@ -3614,8 +3996,7 @@ class Game {
     for (const hold of this.routeHolds) {
       const isImportant = contactIds.has(hold.id);
       this.drawHold(ctx, hold, isImportant, {
-        alpha: isImportant ? 1 : 0.4,
-        brightness: isImportant ? 1 : 1.3
+        alpha: isImportant ? 1 : 0.4
       });
       if (hold.powerUp) {
         this.drawPowerUpIcon(ctx, hold);
@@ -5381,7 +5762,7 @@ class Game {
     ctx.restore();
 
     this.drawOutfitShopBackButton(ctx, x + 9, y + 7);
-    this.drawOutfitShopPreview(ctx, x + 88, y + 330);
+    this.drawOutfitShopPreview(ctx, x + leftW / 2, y + h / 2 + 28);
 
     ctx.save();
     ctx.strokeStyle = "rgba(141, 177, 190, 0.34)";
@@ -5429,7 +5810,7 @@ class Game {
   drawOutfitShopPreview(ctx, cx, cy) {
     ctx.save();
     ctx.globalAlpha = 0.96;
-    this.drawOutfitPreviewCharacter(ctx, cx, cy, true);
+    this.drawOutfitPreviewCharacter(ctx, cx, cy, true, 1.5);
     ctx.restore();
   }
 
@@ -5489,7 +5870,7 @@ class Game {
     ctx.restore();
   }
 
-  drawOutfitPreviewCharacter(ctx, cx, cy, isFront) {
+  drawOutfitPreviewCharacter(ctx, cx, cy, isFront, scale = 1) {
     const previous = {
       cameraY: this.camera.y,
       worldX: this.player.worldX,
@@ -5499,6 +5880,10 @@ class Game {
       animTime: this.player.animTime
     };
     this.camera.y = 0;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -cy);
     this.player.worldX = cx;
     this.player.worldY = cy;
     this.player.bodyAngle = 0;
@@ -5607,6 +5992,7 @@ class Game {
     this.player.bodyAngle = previous.bodyAngle;
     this.player.frontFacingAmount = previous.frontFacingAmount;
     this.player.animTime = previous.animTime;
+    ctx.restore();
   }
 
   drawOutfitPartTabs(ctx, y) {

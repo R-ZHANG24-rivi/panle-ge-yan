@@ -1,0 +1,224 @@
+{
+  "themeId": "theme06",
+  "sourcePackage": "theme6_hold.zip",
+  "holdCount": 10,
+  "presentHoldNumbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "missingHoldNumbersWithinRange": [],
+  "allHoldsHaveGrip": true,
+  "allFinalCoordinateSpacesAligned": true,
+  "zeroByteFiles": [],
+  "issues": [],
+  "checks": [
+    {
+      "id": "theme06_hold_001",
+      "sourcePngSize": [
+        156,
+        119
+      ],
+      "nativeSize": [
+        156,
+        119
+      ],
+      "finalPngSize": [
+        156,
+        119
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 605,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_002",
+      "sourcePngSize": [
+        159,
+        146
+      ],
+      "nativeSize": [
+        159,
+        146
+      ],
+      "finalPngSize": [
+        159,
+        146
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 640,
+      "gripFileBytes": 155
+    },
+    {
+      "id": "theme06_hold_003",
+      "sourcePngSize": [
+        131,
+        180
+      ],
+      "nativeSize": [
+        131,
+        180
+      ],
+      "finalPngSize": [
+        131,
+        180
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 607,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_004",
+      "sourcePngSize": [
+        111,
+        168
+      ],
+      "nativeSize": [
+        111,
+        168
+      ],
+      "finalPngSize": [
+        111,
+        168
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 573,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_005",
+      "sourcePngSize": [
+        154,
+        197
+      ],
+      "nativeSize": [
+        154,
+        197
+      ],
+      "finalPngSize": [
+        154,
+        197
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 636,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_006",
+      "sourcePngSize": [
+        44,
+        87
+      ],
+      "nativeSize": [
+        44,
+        87
+      ],
+      "finalPngSize": [
+        44,
+        87
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 478,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme06_hold_007",
+      "sourcePngSize": [
+        86,
+        84
+      ],
+      "nativeSize": [
+        86,
+        84
+      ],
+      "finalPngSize": [
+        86,
+        84
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 483,
+      "gripFileBytes": 150
+    },
+    {
+      "id": "theme06_hold_008",
+      "sourcePngSize": [
+        141,
+        133
+      ],
+      "nativeSize": [
+        141,
+        133
+      ],
+      "finalPngSize": [
+        141,
+        133
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 558,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_009",
+      "sourcePngSize": [
+        141,
+        162
+      ],
+      "nativeSize": [
+        141,
+        162
+      ],
+      "finalPngSize": [
+        141,
+        162
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 702,
+      "gripFileBytes": 154
+    },
+    {
+      "id": "theme06_hold_010",
+      "sourcePngSize": [
+        172,
+        206
+      ],
+      "nativeSize": [
+        172,
+        206
+      ],
+      "finalPngSize": [
+        172,
+        206
+      ],
+      "outlinePathCount": 1,
+      "gripCount": 1,
+      "fullCoordinateSpaceAligned": true,
+      "outlineFileBytes": 609,
+      "gripFileBytes": 154
+    }
+  ]
+}

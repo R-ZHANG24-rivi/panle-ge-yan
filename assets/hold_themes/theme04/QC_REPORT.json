@@ -1,0 +1,175 @@
+{
+  "themeId": "theme04",
+  "variant": "0.8x",
+  "holdCount": 11,
+  "globalScaleAdjustment": 0.8,
+  "allNormalizedGripCoordinatesPreserved": true,
+  "zeroByteFiles": [],
+  "checks": [
+    {
+      "id": "theme04_hold_001",
+      "oldNativeSize": [
+        219,
+        158
+      ],
+      "newNativeSize": [
+        175,
+        126
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.799087,
+      "actualScaleY": 0.797468,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_002",
+      "oldNativeSize": [
+        378,
+        279
+      ],
+      "newNativeSize": [
+        302,
+        223
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.798942,
+      "actualScaleY": 0.799283,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_003",
+      "oldNativeSize": [
+        321,
+        263
+      ],
+      "newNativeSize": [
+        257,
+        210
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.800623,
+      "actualScaleY": 0.798479,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_004",
+      "oldNativeSize": [
+        107,
+        69
+      ],
+      "newNativeSize": [
+        86,
+        55
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.803738,
+      "actualScaleY": 0.797101,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_005",
+      "oldNativeSize": [
+        323,
+        221
+      ],
+      "newNativeSize": [
+        258,
+        177
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.798762,
+      "actualScaleY": 0.800905,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_006",
+      "oldNativeSize": [
+        319,
+        210
+      ],
+      "newNativeSize": [
+        255,
+        168
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.799373,
+      "actualScaleY": 0.8,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_007",
+      "oldNativeSize": [
+        314,
+        182
+      ],
+      "newNativeSize": [
+        251,
+        146
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.799363,
+      "actualScaleY": 0.802198,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_008",
+      "oldNativeSize": [
+        193,
+        230
+      ],
+      "newNativeSize": [
+        154,
+        184
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.797927,
+      "actualScaleY": 0.8,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_009",
+      "oldNativeSize": [
+        174,
+        166
+      ],
+      "newNativeSize": [
+        139,
+        133
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.798851,
+      "actualScaleY": 0.801205,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_010",
+      "oldNativeSize": [
+        266,
+        319
+      ],
+      "newNativeSize": [
+        213,
+        255
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.800752,
+      "actualScaleY": 0.799373,
+      "gripNormalizedCoordinatesPreserved": true
+    },
+    {
+      "id": "theme04_hold_011",
+      "oldNativeSize": [
+        134,
+        264
+      ],
+      "newNativeSize": [
+        107,
+        211
+      ],
+      "requestedScale": 0.8,
+      "actualScaleX": 0.798507,
+      "actualScaleY": 0.799242,
+      "gripNormalizedCoordinatesPreserved": true
+    }
+  ]
+}

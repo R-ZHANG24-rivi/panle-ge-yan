@@ -151,3 +151,35 @@ distanceError = actualReach - targetDistance;
 - 将 `requestAnimationFrame` 调度替换为小程序可用的帧循环。
 - 将 `localStorage` 封装替换为小程序本地存储 API。
 - 根据小程序 Canvas API 调整上下文初始化、DPR 和尺寸缩放逻辑。
+
+## 抓握音效系统
+
+当前抓握成功音效只使用一个基础文件：`assets/audio/grab-success.ogg`。游戏会在加载阶段通过 Web Audio API 预加载这个文件，解码后缓存为 `AudioBuffer`，成功抓握时用新的 `AudioBufferSourceNode` 播放，因此多个短音效可以快速连续触发，不会互相抢占播放进度。
+
+`lucky`、`good`、`perfect` 三档反馈使用同一个音频文件，通过 `playbackRate` 和音量区分：
+
+- `lucky / 惊险`：`playbackRate = 0.84`，`volume = 0.75`
+- `good / 不错`：`playbackRate = 1.0`，`volume = 0.8`
+- `perfect / 精准`：`playbackRate = 1.18`，`volume = 0.9`
+
+连击会在当前等级的基础上继续提高音高：`comboPitchBonus = Math.min(comboCount, 6) * 0.04`，最终 `playbackRate` 不超过 `1.35`。这样连续精准抓点时，声音会逐步变亮、变高，形成连击感。
+
+短促抓握音效适合实时变调，因为持续时间短，轻微改变 `playbackRate` 不会明显破坏节奏或音色，反而能用很低的资源成本表达不同反馈等级。背景音乐这类长音频不适合用同样方式频繁变调。
+
+如需替换抓握音效，直接替换 `assets/audio/grab-success.ogg` 即可。建议保持文件较短、起音清楚、无长尾混响，并继续使用浏览器兼容的短音频。替换后刷新页面，游戏会重新加载并解码新的基础音效。
+## 岩点主题资源
+
+岩点资源已迁移到 `assets/hold_themes/`，当前包含 `theme01` 到 `theme06` 六套主题。旧的 `assets/theme01_holds/` 已删除，不再作为运行时资源路径使用。
+
+每一局游戏只会使用一套岩点主题。游戏运行过程中，新生成的路线岩点和辅助岩点都会从当前主题内随机选择，不会混用其他主题。只有在三条命全部耗尽、完全死亡后重新开始时，才会随机切换到另一套不同的岩点主题。
+
+抓握判定圆心使用每个岩点对应的 `grip` 数据：优先读取主题包中 `grip/*.svg` 的圆心坐标；如果 grip SVG 只是 14x14 的独立标记图，没有完整岩点画布坐标，则回退使用 manifest 中的 `grips` 坐标。黄色抓握判断区域会以该 grip 点为圆心。
+
+蓄力音效使用 `assets/audio/charge.mp3`。玩家按住屏幕进入蓄力时循环播放，音量为上一版的 95%；蓄力条从绿到红时正放，从红回绿时播放反向音频。背景音乐音量当前为原上一版的 110%。
+
+theme01 已替换为 `theme01_codex_final_updated.zip` 中的新资源。theme05 和 theme06 出现时都使用图示黄色系岩壁配色；岩壁分段、纹理、螺丝孔和几何生成规则保持不变。
+theme04 出现时使用图示蓝灰系岩壁配色；岩壁分段、纹理、螺丝孔和几何生成规则保持不变。
+吸铁石和放大镜道具触发音效使用 `assets/audio/power-up.mp3`。
+没抓到岩点并进入掉落/回落流程时，音效使用 `assets/audio/miss.ogg`，当前由 `error_005.ogg` 替换。
+点击游戏界面顶部的“重新开始”按钮会重新开局，并随机切换到另一套不同岩点主题。
+试衣间预览人物在左侧窗口内居中显示，尺寸为原预览的 1.5 倍。
