@@ -95,6 +95,10 @@ const CONFIG = {
   chalkShakeInterval: 2,
   chalkShakeDuration: 1.05,
   chalkShakeAmplitude: 7,
+  swingHandInterval: 3.0,
+  swingHandDuration: 2.4,
+  swingHandAmplitude: 24,
+  bendSignDeadband: 0.2,
   powerUpChance: 0.13,
   powerUpMinGap: 5,
   powerUpDurations: {
@@ -642,6 +646,25 @@ function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection, f
     upperActual: distance(root, joint),
     lowerActual: distance(joint, end)
   };
+}
+
+// 弯向迟滞选择：非蓄力态下锁定四肢弯向，仅当目标明显越过翻转边界(deadband)时才切换，
+// 避免肩/髋 IK 弯向在几何边界附近平移时反复翻面（不同方向反复开合）。
+function chooseBendSign(root, target, bendDirection, storedSign, deadband) {
+  const toTarget = subtract(target, root);
+  const rawDistance = Math.hypot(toTarget.x, toTarget.y);
+  const direction = rawDistance < 0.001 ? { x: 0, y: 1 } : scale(toTarget, 1 / rawDistance);
+  const perpendicular = { x: -direction.y, y: direction.x };
+  const bend = bendDirection || perpendicular;
+  const dot = perpendicular.x * bend.x + perpendicular.y * bend.y;
+  const naturalSign = dot < 0 ? -1 : 1;
+  if (storedSign !== -1 && storedSign !== 1) {
+    return naturalSign;
+  }
+  if (naturalSign !== storedSign && Math.abs(dot) > deadband) {
+    return naturalSign;
+  }
+  return storedSign;
 }
 
 class ScoreManager {
@@ -1313,6 +1336,7 @@ class Player {
       rightFoot: { x: x + 24, y: routeY + 110 }
     };
     this.chargeBendSigns = null; // 蓄力期间锁定的四肢弯向（charge=0 捕获，离开蓄力作废）
+    this.limbBendSigns = { leftArm: null, rightArm: null, leftLeg: null, rightLeg: null }; // 非蓄力态弯向迟滞锁定
     this.motion = {};
     this.animTime = 0;
     this.animDuration = 0;
@@ -1322,6 +1346,8 @@ class Player {
     this.restElapsed = 0;
     this.chalkShakeTimer = 0;
     this.nextChalkShakeHand = "leftHand";
+    this.swingHandTimer = 0;
+    this.nextSwingHand = "rightHand";
     this.frontFacingAmount = 0;
     this.headDroop = 0;
   }
@@ -1496,7 +1522,7 @@ class Player {
     return rawT >= 1;
   }
 
-  updateReadyRest(deltaTime, currentHold, enableChalkShake) {
+  updateReadyRest(deltaTime, currentHold, enableChalkShake, leftHold, rightHold) {
     if (!currentHold) {
       return;
     }
@@ -1513,7 +1539,9 @@ class Player {
 
     if (!enableChalkShake) {
       this.motion.idleShakeHand = null;
+      this.motion.idleSwingHand = null;
       this.chalkShakeTimer = 0;
+      this.swingHandTimer = 0;
       return;
     }
 
@@ -1528,30 +1556,98 @@ class Player {
       return;
     }
 
+    // 进行中的甩手休息：推进并在到期时收回（期间不触发其它闲置动作）
+    if (this.motion.idleSwingHand) {
+      this.motion.idleSwingTime += deltaTime;
+      if (this.motion.idleSwingTime >= CONFIG.swingHandDuration) {
+        this.nextSwingHand = this.motion.idleSwingHand === "leftHand" ? "rightHand" : "leftHand";
+        this.motion.idleSwingHand = null;
+        this.motion.idleSwingTime = 0;
+        this.swingHandTimer = 0;
+      }
+      return;
+    }
+
+    // 两者皆无：掏粉袋按原间隔触发；甩手在空闲时段按自身间隔错峰触发（互不重叠）
     this.chalkShakeTimer += deltaTime;
     if (this.chalkShakeTimer >= CONFIG.chalkShakeInterval) {
-      const handName = this.pickChalkShakeHand(currentHold);
+      const handName = this.pickChalkShakeHand(leftHold, rightHold);
       this.motion.idleShakeHand = handName;
       this.motion.idleShakeTime = 0;
       this.motion.idleShakeStart = { ...this.handAims[handName] };
+      return;
+    }
+
+    this.swingHandTimer += deltaTime;
+    if (this.swingHandTimer >= CONFIG.swingHandInterval) {
+      const handName = this.pickSwingHand(leftHold, rightHold);
+      this.motion.idleSwingHand = handName;
+      this.motion.idleSwingTime = 0;
+      this.motion.idleSwingStart = { ...this.handAims[handName] };
+      const side = handName === "leftHand" ? -1 : 1;
+      const shoulder = add(
+        { x: this.worldX, y: this.worldY },
+        rotate({ x: side * CONFIG.shoulderWidth / 2, y: -CONFIG.torsoLength / 2 }, this.bodyAngle)
+      );
+      this.motion.idleSwingAnchor = add(shoulder, rotate({ x: side * 22, y: 42 }, this.bodyAngle));
+      this.swingHandTimer = 0;
     }
   }
 
-  pickChalkShakeHand(currentHold) {
-    const next = this.nextChalkShakeHand;
-    const other = next === "leftHand" ? "rightHand" : "leftHand";
-    const nextOnCurrent = this.contacts[next] === currentHold.id;
-    const otherOnCurrent = this.contacts[other] === currentHold.id;
-    if (nextOnCurrent && !otherOnCurrent) {
-      return other;
+  pickChalkShakeHand(leftHold, rightHold) {
+    // 摸粉袋同样保留较高握点，只解放较低握点的手去摸粉袋；
+    // 两只手握同一岩点时，任选一只。
+    if (leftHold && rightHold && leftHold.id === rightHold.id) {
+      return this.nextChalkShakeHand;
     }
-    return next;
+    if (leftHold && rightHold) {
+      return leftHold.y >= rightHold.y ? "leftHand" : "rightHand";
+    }
+    return this.nextChalkShakeHand;
+  }
+
+  pickSwingHand(leftHold, rightHold) {
+    // 永远保留较高处(y 较小)的握点，只甩较低处(y 较大)握点的手；
+    // 两只手握同一岩点时，任选一只甩（另一只可交换/摸粉袋）。
+    if (leftHold && rightHold && leftHold.id === rightHold.id) {
+      return this.nextSwingHand;
+    }
+    if (leftHold && rightHold) {
+      return leftHold.y >= rightHold.y ? "leftHand" : "rightHand";
+    }
+    return leftHold ? "leftHand" : "rightHand";
+  }
+
+  getSwingHandAim(handName) {
+    const rawT = clamp((this.motion.idleSwingTime || 0) / CONFIG.swingHandDuration, 0, 1);
+    const start = this.motion.idleSwingStart || this.handAims[handName];
+    const anchor = this.motion.idleSwingAnchor || this.handAims[handName];
+    const side = handName === "leftHand" ? -1 : 1;
+    let target;
+    if (rawT < 0.28) {
+      // 手从握住点移到肩部下方的悬垂甩动位
+      target = lerpPoint(start, anchor, easeInOutCubic(rawT / 0.28));
+    } else if (rawT < 0.72) {
+      // 在锚点附近来回甩动（钟摆），幅度随时间轻微衰减
+      const localT = (rawT - 0.28) / 0.44;
+      const swing = Math.sin(localT * Math.PI * 2 * 2.2) * CONFIG.swingHandAmplitude * (1 - localT * 0.35);
+      const lift = Math.sin(localT * Math.PI) * 9;
+      target = { x: anchor.x + swing * side, y: anchor.y - lift };
+    } else {
+      // 收回握住点
+      const localT = (rawT - 0.72) / 0.28;
+      target = lerpPoint(anchor, start, easeInOutCubic(localT));
+    }
+    return target;
   }
 
   stopIdleRest() {
     this.motion.idleShakeHand = null;
     this.motion.idleShakeTime = 0;
     this.chalkShakeTimer = 0;
+    this.motion.idleSwingHand = null;
+    this.motion.idleSwingTime = 0;
+    this.swingHandTimer = 0;
   }
 
   getChalkBagWorldPoint() {
@@ -1575,10 +1671,11 @@ class Player {
   }
 
   getIdleHandAim(handName) {
-    if (this.animationStage !== STATE.READY || this.motion.idleShakeHand !== handName) {
+    if (this.animationStage !== STATE.READY) {
       return null;
     }
-    const rawT = clamp((this.motion.idleShakeTime || 0) / CONFIG.chalkShakeDuration, 0, 1);
+    if (this.motion.idleShakeHand === handName) {
+      const rawT = clamp((this.motion.idleShakeTime || 0) / CONFIG.chalkShakeDuration, 0, 1);
     const start = this.motion.idleShakeStart || this.handAims[handName];
     const bag = this.getChalkBagWorldPoint(handName);
     const side = handName === "leftHand" ? -1 : 1;
@@ -1606,7 +1703,12 @@ class Player {
     } else {
       target = lerpPoint(bag, start, easeInOutCubic((rawT - 0.92) / 0.08));
     }
-    return target;
+      return target;
+    }
+    if (this.motion.idleSwingHand === handName) {
+      return this.getSwingHandAim(handName);
+    }
+    return null;
   }
 
   beginTrailingHandMove(targetHold, actionType) {
@@ -2499,7 +2601,11 @@ class Game {
     this.loadingLoaded = 0;
     this.loadingProgress = 0;
 
-    const promises = tasks.map((task) => task().catch(() => false).then((loaded) => {
+    const TASK_TIMEOUT = 8000;
+    const promises = tasks.map((task) => Promise.race([
+      task().catch(() => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), TASK_TIMEOUT))
+    ]).then((loaded) => {
       this.loadingLoaded += 1;
       this.loadingProgress = this.loadingLoaded / this.loadingTotal;
       return loaded;
@@ -2512,6 +2618,18 @@ class Game {
       this.enterStartScreen();
       this.lastTime = performance.now();
     });
+
+    // 全局安全网：无论哪个 task 意外挂起，最多 12 秒后强制进入游戏
+    setTimeout(() => {
+      if (this.loading || this.state === STATE.LOADING) {
+        console.warn("[preload] Safety timeout reached, forcing entry");
+        this.loadingProgress = 1;
+        this.loading = false;
+        this.loadingMessage = "加载完成";
+        this.enterStartScreen();
+        this.lastTime = performance.now();
+      }
+    }, 12000);
   }
 
   resetGame(options = {}) {
@@ -2676,7 +2794,7 @@ class Game {
       return;
     }
 
-    this.player.updateReadyRest(deltaTime, this.currentHold, false);
+    this.player.updateReadyRest(deltaTime, this.currentHold, false, this.generator.getHoldById(this.player.contacts.leftHand), this.generator.getHoldById(this.player.contacts.rightHand));
     this.startDemoTimer += deltaTime;
     if (this.startDemoTimer >= this.startDemoRestDuration) {
       this.beginStartDemoStep();
@@ -2795,7 +2913,7 @@ class Game {
     }
 
     if (this.state === STATE.READY) {
-      this.player.updateReadyRest(deltaTime, this.currentHold, this.holdCount > 0);
+      this.player.updateReadyRest(deltaTime, this.currentHold, this.holdCount > 0, this.generator.getHoldById(this.player.contacts.leftHand), this.generator.getHoldById(this.player.contacts.rightHand));
       return;
     }
 
@@ -3739,10 +3857,27 @@ class Game {
     } else {
       this.player.chargeBendSigns = null;
     }
-    const leftArm = solveTwoBoneIK(anchors.leftShoulder, leftHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: -1, y: 0.35 }, chargeBendSigns && chargeBendSigns.leftArm);
-    const rightArm = solveTwoBoneIK(anchors.rightShoulder, rightHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: 1, y: 0.35 }, chargeBendSigns && chargeBendSigns.rightArm);
-    const leftLeg = solveTwoBoneIK(anchors.leftHip, leftFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: -1, y: 0.15 }, chargeBendSigns && chargeBendSigns.leftLeg);
-    const rightLeg = solveTwoBoneIK(anchors.rightHip, rightFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: 1, y: 0.15 }, chargeBendSigns && chargeBendSigns.rightLeg);
+    const deadband = CONFIG.bendSignDeadband;
+    const lb = this.player.limbBendSigns;
+    const leftArmSign = isChargingPose ? chargeBendSigns.leftArm : chooseBendSign(anchors.leftShoulder, leftHandTarget, { x: -1, y: 0.35 }, lb.leftArm, deadband);
+    const rightArmSign = isChargingPose ? chargeBendSigns.rightArm : chooseBendSign(anchors.rightShoulder, rightHandTarget, { x: 1, y: 0.35 }, lb.rightArm, deadband);
+    const leftLegSign = isChargingPose ? chargeBendSigns.leftLeg : chooseBendSign(anchors.leftHip, leftFootTarget, { x: -1, y: 0.15 }, lb.leftLeg, deadband);
+    const rightLegSign = isChargingPose ? chargeBendSigns.rightLeg : chooseBendSign(anchors.rightHip, rightFootTarget, { x: 1, y: 0.15 }, lb.rightLeg, deadband);
+    if (isChargingPose) {
+      lb.leftArm = chargeBendSigns.leftArm;
+      lb.rightArm = chargeBendSigns.rightArm;
+      lb.leftLeg = chargeBendSigns.leftLeg;
+      lb.rightLeg = chargeBendSigns.rightLeg;
+    } else {
+      lb.leftArm = leftArmSign;
+      lb.rightArm = rightArmSign;
+      lb.leftLeg = leftLegSign;
+      lb.rightLeg = rightLegSign;
+    }
+    const leftArm = solveTwoBoneIK(anchors.leftShoulder, leftHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: -1, y: 0.35 }, leftArmSign);
+    const rightArm = solveTwoBoneIK(anchors.rightShoulder, rightHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: 1, y: 0.35 }, rightArmSign);
+    const leftLeg = solveTwoBoneIK(anchors.leftHip, leftFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: -1, y: 0.15 }, leftLegSign);
+    const rightLeg = solveTwoBoneIK(anchors.rightHip, rightFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: 1, y: 0.15 }, rightLegSign);
     this.player.debugLengths = {
       leftArm: leftArm.upperActual + leftArm.lowerActual,
       rightArm: rightArm.upperActual + rightArm.lowerActual,
@@ -4665,6 +4800,8 @@ class Game {
   drawPlayer(ctx) {
     const pose = this.calculatePose();
     const toScreen = (point) => this.worldToScreen(point);
+    // 掏粉袋动作中，被抬起摸粉袋的那只手需绘制在粉袋/上衣/腿部图层最上方
+    const chalkHand = this.player.motion.idleShakeHand || null;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -4680,6 +4817,7 @@ class Game {
       upperSourceStart: { x: 208, y: 71 },
       upperSourceEnd: { x: 131.98, y: 210 },
       upperLengthExtend: CONFIG.thighKneeOverlap,
+      upperCrossScale: 0.284,
       lowerAsset: "rightShin",
       lowerSourceStart: { x: 178, y: 50 },
       lowerSourceEnd: { x: 122, y: 251 },
@@ -4695,6 +4833,7 @@ class Game {
       lowerSourceEnd: { x: 150, y: 70 },
       lowerCrossScale: 0.224
     });
+    this.drawHand(ctx, toScreen(pose.rightArm.end));
     this.drawClimbingShoe(ctx, toScreen(pose.rightLeg.end), 1, rightKneeScreen);
 
     this.drawLimb(ctx, leftHipScreen, leftKneeScreen, toScreen(pose.leftLeg.end), THEME.player.skin, 7, {
@@ -4702,6 +4841,7 @@ class Game {
       upperSourceStart: { x: 92, y: 71 },
       upperSourceEnd: { x: 168.02, y: 210 },
       upperLengthExtend: CONFIG.thighKneeOverlap,
+      upperCrossScale: 0.284,
       lowerAsset: "leftShin",
       lowerSourceStart: { x: 122, y: 50 },
       lowerSourceEnd: { x: 178, y: 251 },
@@ -4723,7 +4863,33 @@ class Game {
     });
     this.drawClimbingShoe(ctx, toScreen(pose.leftLeg.end), -1, leftKneeScreen);
     this.drawHand(ctx, toScreen(pose.leftArm.end));
-    this.drawHand(ctx, toScreen(pose.rightArm.end));
+
+    // 掏粉袋动作：被抬起摸粉袋的手臂重绘到最上层，确保盖住粉袋/上衣/腿部
+    if (chalkHand === "leftHand") {
+      this.drawLimb(ctx, toScreen(pose.leftShoulder), toScreen(pose.leftArm.joint), toScreen(pose.leftArm.end), THEME.player.skin, 7, {
+        upperAsset: "leftUpperArm",
+        upperSourceStart: { x: 150, y: 231 },
+        upperSourceEnd: { x: 150, y: 70 },
+        upperCrossScale: 0.224,
+        lowerAsset: "leftLowerArm",
+        lowerSourceStart: { x: 150, y: 231 },
+        lowerSourceEnd: { x: 150, y: 70 },
+        lowerCrossScale: 0.224
+      });
+      this.drawHand(ctx, toScreen(pose.leftArm.end));
+    } else if (chalkHand === "rightHand") {
+      this.drawLimb(ctx, toScreen(pose.rightShoulder), toScreen(pose.rightArm.joint), toScreen(pose.rightArm.end), THEME.player.skin, 7, {
+        upperAsset: "rightUpperArm",
+        upperSourceStart: { x: 150, y: 231 },
+        upperSourceEnd: { x: 150, y: 70 },
+        upperCrossScale: 0.224,
+        lowerAsset: "rightLowerArm",
+        lowerSourceStart: { x: 150, y: 231 },
+        lowerSourceEnd: { x: 150, y: 70 },
+        lowerCrossScale: 0.224
+      });
+      this.drawHand(ctx, toScreen(pose.rightArm.end));
+    }
 
     if (DEBUG) {
       this.drawPoseDebug(ctx, pose);
@@ -5352,12 +5518,13 @@ class Game {
 
   drawHand(ctx, point) {
     const assetName = point.x < CONFIG.logicalWidth / 2 ? "leftHand" : "rightHand";
-    if (this.drawEndpointSprite(ctx, assetName, point, 0.07)) {
-      return;
-    }
-    ctx.fillStyle = THEME.player.skin;
+    // 底层：如果有手部贴图则画在圆球下方
+    this.drawEndpointSprite(ctx, assetName, point, 0.07);
+    // 手腕圆球——始终绘制，覆盖在手部贴图上方
+    const r = 8; // 手腕圆球半径（世界坐标）
+    ctx.fillStyle = "#FFC78F";
     ctx.beginPath();
-    ctx.arc(point.x, point.y, CONFIG.handRadius + 0.6, 0, Math.PI * 2);
+    ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -6252,6 +6419,7 @@ class Game {
       upperSourceStart: { x: 208, y: 71 },
       upperSourceEnd: { x: 131.98, y: 210 },
       upperLengthExtend: CONFIG.thighKneeOverlap,
+      upperCrossScale: 0.284,
       lowerAsset: "rightShin",
       lowerSourceStart: { x: 178, y: 50 },
       lowerSourceEnd: { x: 122, y: 251 },
@@ -6267,12 +6435,14 @@ class Game {
       lowerSourceEnd: { x: 150, y: 70 },
       lowerCrossScale: 0.224
     });
+    this.drawHand(ctx, toScreen(pose.rightArm.end));
     this.drawClimbingShoe(ctx, toScreen(pose.rightLeg.end), 1, rightKneeScreen);
     this.drawLimb(ctx, leftHipScreen, leftKneeScreen, toScreen(pose.leftLeg.end), THEME.player.skin, 7, {
       upperAsset: "leftThigh",
       upperSourceStart: { x: 92, y: 71 },
       upperSourceEnd: { x: 168.02, y: 210 },
       upperLengthExtend: CONFIG.thighKneeOverlap,
+      upperCrossScale: 0.284,
       lowerAsset: "leftShin",
       lowerSourceStart: { x: 122, y: 50 },
       lowerSourceEnd: { x: 178, y: 251 },
