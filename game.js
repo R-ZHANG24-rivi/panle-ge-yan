@@ -279,7 +279,17 @@ const FEEDBACK_ASSET_FILES = {
   combo7: "assets/ui/feedback/combo-7.png?v=20260710-feedback-2",
   combo8: "assets/ui/feedback/combo-8.png?v=20260710-feedback-2",
   combo9: "assets/ui/feedback/combo-9.png?v=20260710-feedback-2",
-  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-2"
+  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-2",
+  combo11: "assets/ui/feedback/combo-11.png?v=20260713-combo11-20",
+  combo12: "assets/ui/feedback/combo-12.png?v=20260713-combo11-20",
+  combo13: "assets/ui/feedback/combo-13.png?v=20260713-combo11-20",
+  combo14: "assets/ui/feedback/combo-14.png?v=20260713-combo11-20",
+  combo15: "assets/ui/feedback/combo-15.png?v=20260713-combo11-20",
+  combo16: "assets/ui/feedback/combo-16.png?v=20260713-combo11-20",
+  combo17: "assets/ui/feedback/combo-17.png?v=20260713-combo11-20",
+  combo18: "assets/ui/feedback/combo-18.png?v=20260713-combo11-20",
+  combo19: "assets/ui/feedback/combo-19.png?v=20260713-combo11-20",
+  combo20: "assets/ui/feedback/combo-20.png?v=20260713-combo11-20"
 };
 
 const AUDIO_FILES = {
@@ -607,7 +617,7 @@ function shadeHex(hex, amount) {
   return `#${shifted.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
 }
 
-function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection) {
+function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection, forceBendSign) {
   const toTarget = subtract(target, root);
   const rawDistance = Math.hypot(toTarget.x, toTarget.y);
   const maxReach = upperLength + lowerLength;
@@ -619,7 +629,8 @@ function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection) {
   const h = Math.sqrt(Math.max(0, upperLength * upperLength - a * a));
   const perpendicular = { x: -direction.y, y: direction.x };
   const bend = bendDirection || perpendicular;
-  const bendSign = perpendicular.x * bend.x + perpendicular.y * bend.y < 0 ? -1 : 1;
+  // forceBendSign（蓄力期间锁定弯向用）：指定则不随方向旋转而翻转
+  const bendSign = forceBendSign !== undefined ? forceBendSign : (perpendicular.x * bend.x + perpendicular.y * bend.y < 0 ? -1 : 1);
   const normal = scale(perpendicular, bendSign);
   const mid = add(root, scale(direction, a));
   const joint = add(mid, scale(normal, h));
@@ -627,6 +638,7 @@ function solveTwoBoneIK(root, target, upperLength, lowerLength, bendDirection) {
     joint,
     end,
     clipped: rawDistance > maxReach,
+    bendSign,
     upperActual: distance(root, joint),
     lowerActual: distance(joint, end)
   };
@@ -1300,6 +1312,7 @@ class Player {
       leftFoot: { x: x - 24, y: routeY + 110 },
       rightFoot: { x: x + 24, y: routeY + 110 }
     };
+    this.chargeBendSigns = null; // 蓄力期间锁定的四肢弯向（charge=0 捕获，离开蓄力作废）
     this.motion = {};
     this.animTime = 0;
     this.animDuration = 0;
@@ -2508,6 +2521,7 @@ class Game {
     }
     this.charge = 0;
     this.chargeDirection = 1;
+    this.poseCharge = 0;
     this.score = 0;
     this.preciseCombo = 0;
     this.bestPreciseCombo = 0;
@@ -2552,6 +2566,7 @@ class Game {
     this.resetGame();
     this.uiPanel = null;
     this.charge = 0;
+    this.poseCharge = 0;
     this.prepareStartDemoClimb();
     this.state = STATE.START;
     if (this.audio) {
@@ -2608,6 +2623,7 @@ class Game {
       this.startDemoTimer += deltaTime;
       const t = clamp(this.startDemoTimer / this.startDemoChargeDuration, 0, 1);
       this.charge = this.startDemoChargeTarget * easeOutCubic(t);
+      this.poseCharge = Math.max(this.poseCharge, this.charge);
       this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
       if (t >= 1) {
         this.startDemoAttempt = this.createStartDemoAttempt();
@@ -2701,6 +2717,7 @@ class Game {
     );
     this.startDemoPhase = "charge";
     this.startDemoTimer = 0;
+    this.poseCharge = 0;
     this.player.stopIdleRest();
   }
 
@@ -3033,6 +3050,7 @@ class Game {
     this.tutorialDismissed = true;
     this.charge = 0;
     this.chargeDirection = 1;
+    this.poseCharge = 0;
     this.player.stopIdleRest();
     this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
     this.audio.playCharge(this.chargeDirection);
@@ -3052,6 +3070,7 @@ class Game {
       this.audio.playCharge(this.chargeDirection);
     }
     this.charge = clamp(this.charge, 0, 1);
+    this.poseCharge = Math.max(this.poseCharge, this.charge);
   }
   handlePressEnd() {
     if (this.state !== STATE.CHARGING) {
@@ -3066,6 +3085,7 @@ class Game {
       this.audio.stopCharge();
       this.charge = 0;
       this.chargeDirection = 1;
+      this.poseCharge = 0;
       this.player.stopIdleRest();
       this.player.worldX = this.player.neutralX;
       this.player.worldY = this.player.neutralY;
@@ -3256,6 +3276,7 @@ class Game {
     this.camera.beginFollowToWorldY(this.player.getNeutralBodyForHold(this.currentHold).y);
     this.charge = 0;
     this.chargeDirection = 1;
+    this.poseCharge = 0;
     this.state = STATE.BODY_FOLLOW;
   }
 
@@ -3273,6 +3294,7 @@ class Game {
     this.player.beginFall(result, this.targetHold, this.recoveringFromMiss);
     this.charge = 0;
     this.chargeDirection = 1;
+    this.poseCharge = 0;
     this.state = STATE.FALLING;
   }
   finishSettle() {
@@ -3429,6 +3451,7 @@ class Game {
     this.pendingRestHand = null;
     this.charge = 0;
     this.chargeDirection = 1;
+    this.poseCharge = 0;
     this.settlePlayerPose(this.previousHold, actionType);
     this.camera.beginFollowToWorldY(this.player.getNeutralBodyForHold(this.currentHold).y);
     if (this.camera.active) {
@@ -3698,10 +3721,28 @@ class Game {
     const rightHandTarget = this.getHoldPointByContact("rightHand");
     const leftFootTarget = this.getHoldPointByContact("leftFoot");
     const rightFootTarget = this.getHoldPointByContact("rightFoot");
-    const leftArm = solveTwoBoneIK(anchors.leftShoulder, leftHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: -1, y: 0.35 });
-    const rightArm = solveTwoBoneIK(anchors.rightShoulder, rightHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: 1, y: 0.35 });
-    const leftLeg = solveTwoBoneIK(anchors.leftHip, leftFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: -1, y: 0.15 });
-    const rightLeg = solveTwoBoneIK(anchors.rightHip, rightFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: 1, y: 0.15 });
+    // 蓄力态（游戏蓄力 + 开始页自动演示蓄力）锁定每条四肢的弯向，
+    // 避免 IK 弯向随身体 2D 移动跨过 90° 而翻转，导致肩/髋关节中途翻面、反复开合。
+    // 弯向在蓄力起点(charge≈0)捕获一次，整段蓄力保持，离开蓄力即作废。
+    const isChargingPose = this.state === STATE.CHARGING || this.startDemoPhase === "charge";
+    let chargeBendSigns = null;
+    if (isChargingPose) {
+      if (!this.player.chargeBendSigns) {
+        this.player.chargeBendSigns = {
+          leftArm: solveTwoBoneIK(anchors.leftShoulder, leftHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: -1, y: 0.35 }).bendSign,
+          rightArm: solveTwoBoneIK(anchors.rightShoulder, rightHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: 1, y: 0.35 }).bendSign,
+          leftLeg: solveTwoBoneIK(anchors.leftHip, leftFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: -1, y: 0.15 }).bendSign,
+          rightLeg: solveTwoBoneIK(anchors.rightHip, rightFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: 1, y: 0.15 }).bendSign
+        };
+      }
+      chargeBendSigns = this.player.chargeBendSigns;
+    } else {
+      this.player.chargeBendSigns = null;
+    }
+    const leftArm = solveTwoBoneIK(anchors.leftShoulder, leftHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: -1, y: 0.35 }, chargeBendSigns && chargeBendSigns.leftArm);
+    const rightArm = solveTwoBoneIK(anchors.rightShoulder, rightHandTarget, CONFIG.upperArmLength, CONFIG.forearmLength, { x: 1, y: 0.35 }, chargeBendSigns && chargeBendSigns.rightArm);
+    const leftLeg = solveTwoBoneIK(anchors.leftHip, leftFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: -1, y: 0.15 }, chargeBendSigns && chargeBendSigns.leftLeg);
+    const rightLeg = solveTwoBoneIK(anchors.rightHip, rightFootTarget, CONFIG.thighLength, CONFIG.shinLength, { x: 1, y: 0.15 }, chargeBendSigns && chargeBendSigns.rightLeg);
     this.player.debugLengths = {
       leftArm: leftArm.upperActual + leftArm.lowerActual,
       rightArm: rightArm.upperActual + rightArm.lowerActual,
@@ -5562,7 +5603,7 @@ class Game {
     if (combo <= 1) {
       return;
     }
-    const cappedCombo = Math.min(10, combo);
+    const cappedCombo = Math.min(20, combo);
     const asset = this.feedbackAssets[`combo${cappedCombo}`];
     if (asset && asset.loaded && !asset.failed && asset.image.complete) {
       const w = 80;
