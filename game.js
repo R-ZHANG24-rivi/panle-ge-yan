@@ -4689,9 +4689,11 @@ class Game {
       upperAsset: "rightUpperArm",
       upperSourceStart: { x: 150, y: 231 },
       upperSourceEnd: { x: 150, y: 70 },
+      upperCrossScale: 0.224,
       lowerAsset: "rightLowerArm",
       lowerSourceStart: { x: 150, y: 231 },
-      lowerSourceEnd: { x: 150, y: 70 }
+      lowerSourceEnd: { x: 150, y: 70 },
+      lowerCrossScale: 0.224
     });
     this.drawClimbingShoe(ctx, toScreen(pose.rightLeg.end), 1, rightKneeScreen);
 
@@ -4713,9 +4715,11 @@ class Game {
       upperAsset: "leftUpperArm",
       upperSourceStart: { x: 150, y: 231 },
       upperSourceEnd: { x: 150, y: 70 },
+      upperCrossScale: 0.224,
       lowerAsset: "leftLowerArm",
       lowerSourceStart: { x: 150, y: 231 },
-      lowerSourceEnd: { x: 150, y: 70 }
+      lowerSourceEnd: { x: 150, y: 70 },
+      lowerCrossScale: 0.224
     });
     this.drawClimbingShoe(ctx, toScreen(pose.leftLeg.end), -1, leftKneeScreen);
     this.drawHand(ctx, toScreen(pose.leftArm.end));
@@ -6257,9 +6261,11 @@ class Game {
       upperAsset: "rightUpperArm",
       upperSourceStart: { x: 150, y: 231 },
       upperSourceEnd: { x: 150, y: 70 },
+      upperCrossScale: 0.224,
       lowerAsset: "rightLowerArm",
       lowerSourceStart: { x: 150, y: 231 },
-      lowerSourceEnd: { x: 150, y: 70 }
+      lowerSourceEnd: { x: 150, y: 70 },
+      lowerCrossScale: 0.224
     });
     this.drawClimbingShoe(ctx, toScreen(pose.rightLeg.end), 1, rightKneeScreen);
     this.drawLimb(ctx, leftHipScreen, leftKneeScreen, toScreen(pose.leftLeg.end), THEME.player.skin, 7, {
@@ -6280,9 +6286,11 @@ class Game {
       upperAsset: "leftUpperArm",
       upperSourceStart: { x: 150, y: 231 },
       upperSourceEnd: { x: 150, y: 70 },
+      upperCrossScale: 0.224,
       lowerAsset: "leftLowerArm",
       lowerSourceStart: { x: 150, y: 231 },
-      lowerSourceEnd: { x: 150, y: 70 }
+      lowerSourceEnd: { x: 150, y: 70 },
+      lowerCrossScale: 0.224
     });
     this.drawClimbingShoe(ctx, toScreen(pose.leftLeg.end), -1, leftKneeScreen);
     this.drawHand(ctx, toScreen(pose.leftArm.end));
