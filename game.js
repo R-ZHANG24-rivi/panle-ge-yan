@@ -2554,6 +2554,9 @@ class Game {
     this.charge = 0;
     this.prepareStartDemoClimb();
     this.state = STATE.START;
+    if (this.audio) {
+      this.audio.playBgm();
+    }
   }
 
   startGame() {
@@ -3780,14 +3783,17 @@ class Game {
     this.drawWallBoltHoles(ctx);
     ctx.globalAlpha = 1;
 
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
-    ctx.font = "900 42px Arial, Helvetica, sans-serif";
-    ctx.lineWidth = 7;
-    ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
-    ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 250);
-    ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 250);
+    const titleAsset = this.figmaUiAssets && this.figmaUiAssets.coverTitle;
+    if (!this.drawImageAssetContain(ctx, titleAsset, 57, 120, 261, 261)) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
+      ctx.font = "900 42px Arial, Helvetica, sans-serif";
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
+      ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 250);
+      ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 250);
+    }
 
     ctx.fillStyle = "#315f72";
     ctx.font = "bold 16px Arial, Helvetica, sans-serif";
@@ -5379,14 +5385,14 @@ class Game {
     ctx.fillText(String(this.score), CONFIG.safeSide + 62, CONFIG.safeTop + 52);
     this.drawLives(ctx, CONFIG.safeSide + 132, CONFIG.safeTop + 52);
 
-    this.drawPowerUpStatus(ctx, CONFIG.safeTop + 68);
+    this.drawPowerUpStatus(ctx);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "900 17px Arial, Helvetica, sans-serif";
+    ctx.font = "900 15px Arial, Helvetica, sans-serif";
     ctx.fillText("当前高度", CONFIG.safeSide + 3, CONFIG.safeTop + 84);
     ctx.fillText("最高纪录：", 200, CONFIG.safeTop + 84);
 
-    ctx.font = "900 21px Arial, Helvetica, sans-serif";
+    ctx.font = "900 18px Arial, Helvetica, sans-serif";
     ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 118, CONFIG.safeTop + 84);
     ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 292, CONFIG.safeTop + 84);
 
@@ -5398,19 +5404,21 @@ class Game {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
     const gap = 22;
     for (let i = 0; i < CONFIG.maxLives; i += 1) {
       const alive = i < this.livesRemaining;
       ctx.fillStyle = alive ? "#ff5f8c" : "rgba(255, 255, 255, 0.42)";
       ctx.strokeStyle = alive ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.58)";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 4;
       const heartX = x + i * gap;
       ctx.strokeText("♥", heartX, y + 1);
       ctx.fillText("♥", heartX, y + 1);
     }
     ctx.restore();
   }
-  drawPowerUpStatus(ctx, yOffset = 0) {
+  drawPowerUpStatus(ctx) {
     const active = [];
     if (this.powerUps.magnet > 0) {
       active.push(["magnet", this.powerUps.magnet]);
@@ -5421,20 +5429,28 @@ class Game {
     if (active.length === 0) {
       return;
     }
-    let x = 30;
-    const y = yOffset + 38;
     ctx.save();
     ctx.textBaseline = "middle";
-    ctx.font = "bold 11px Arial, Helvetica, sans-serif";
-    for (const [type, timeLeft] of active) {
+    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    const gap = 8;
+    const padX = 12;
+    const boxH = 30;
+    const items = active.map(([type, timeLeft]) => {
       const label = `${POWER_UPS[type].label} ${timeLeft.toFixed(1)}s`;
-      const w = ctx.measureText(label).width + 14;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
-      this.roundRect(ctx, x, y - 12, w, 24, 12);
+      const w = ctx.measureText(label).width + padX * 2;
+      return { type, label, w };
+    });
+    const totalW = items.reduce((sum, it) => sum + it.w, 0) + gap * (items.length - 1);
+    const chargeBarY = CONFIG.logicalHeight - CONFIG.safeBottom - 36;
+    const y = chargeBarY - 12 - boxH / 2;
+    let x = (CONFIG.logicalWidth - totalW) / 2;
+    for (const it of items) {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      this.roundRect(ctx, x, y - boxH / 2, it.w, boxH, boxH / 2);
       ctx.fill();
-      ctx.fillStyle = POWER_UPS[type].color;
-      ctx.fillText(label, x + 7, y + 0.5);
-      x += w + 6;
+      ctx.fillStyle = POWER_UPS[it.type].color;
+      ctx.fillText(it.label, x + padX, y + 0.5);
+      x += it.w + gap;
     }
     ctx.restore();
   }
@@ -6401,7 +6417,7 @@ class Game {
     const w = ctx.measureText(this.uiToast).width + paddingX * 2;
     const h = 36;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - 164;
+    const y = CONFIG.logicalHeight - 220;
     ctx.fillStyle = "rgba(49, 95, 114, 0.84)";
     this.roundRect(ctx, x, y, w, h, 18);
     ctx.fill();
