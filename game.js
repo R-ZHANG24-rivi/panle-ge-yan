@@ -205,103 +205,93 @@ const HOLD_THEME_ASSET_SETS = [
   { id: "theme05", basePath: "assets/hold_themes/theme05", manifestFile: "assets/hold_themes/theme05/theme05_holds_manifest.json" },
   { id: "theme06", basePath: "assets/hold_themes/theme06", manifestFile: "assets/hold_themes/theme06/theme06_holds_manifest.json" }
 ];
-const ROUTE_HOLD_ASSET_BASE = "assets/pink_climbing_holds_complete_assets/individual_png";
-const SUPPORT_HOLD_ASSET_BASE = "assets/light_purple_climbing_holds_complete_assets/individual_png";
-const ROUTE_HOLD_ASSET_FILES = Array.from(
-  { length: 22 },
-  (_, index) => `${ROUTE_HOLD_ASSET_BASE}/pink_climbing_hold_${String(index + 1).padStart(2, "0")}.png`
-);
-const SUPPORT_HOLD_ASSET_FILES = Array.from(
-  { length: 22 },
-  (_, index) => `${SUPPORT_HOLD_ASSET_BASE}/light_purple_climbing_hold_${String(index + 1).padStart(2, "0")}.png`
-);
 const PLAYER_ASSET_FILES = {
-  fallingPose: "assets/player/falling-pose.png",
-  climbingPose: "assets/player/climbing-pose.png",
-  headFront: "assets/player/head-front.png",
-  headBack: "assets/player/head-back.png",
-  hair02Front: "assets/player/outfit/hair-02-front.png",
-  hair02Back: "assets/player/outfit/hair-02-back.png",
-  hairFemaleFront: "assets/player/outfit/hair-female-front.png",
-  hairFemaleBack: "assets/player/outfit/hair-female-back.png",
-  hairMaleFront: "assets/player/outfit/hair-male-front.png",
-  hairMaleBack: "assets/player/outfit/hair-male-back.png",
-  headMaleFront: "assets/player/outfit/head-male-back.png",
-  glasses01: "assets/player/outfit/glasses-01.png",
+  fallingPose: "assets/player/falling_pose.png",
+  climbingPose: "assets/player/climbing_pose.png",
+  headFront: "assets/player/head_front.png",
+  headBack: "assets/player/head_back.png",
+  hair02Front: "assets/player/outfit/hair_02_front.png",
+  hair02Back: "assets/player/outfit/hair_02_back.png",
+  hairFemaleFront: "assets/player/outfit/hair_female_front.png",
+  hairFemaleBack: "assets/player/outfit/hair_female_back.png",
+  hairMaleFront: "assets/player/outfit/hair_male_front.png",
+  hairMaleBack: "assets/player/outfit/hair_male_back.png",
+  headMaleFront: "assets/player/outfit/head_male_back.png",
+  glasses01: "assets/player/outfit/glasses_01.png",
   shirt: "assets/player/shirt.png?v=20260708-rounded",
-  shirtFemale: "assets/player/outfit/shirt-female.png",
-  shirtMale: "assets/player/outfit/shirt-male.png",
-  pantsBlue: "assets/player/outfit/pants-blue.png",
-  pantsBrown: "assets/player/outfit/pants-brown.png",
+  shirtFemale: "assets/player/outfit/shirt_female.png",
+  shirtMale: "assets/player/outfit/shirt_male.png",
+  pantsBlue: "assets/player/outfit/pants_blue.png",
+  pantsBrown: "assets/player/outfit/pants_brown.png",
   shorts: "assets/player/shorts.png",
-  leftUpperArm: "assets/player/left-upper-arm.png",
-  leftLowerArm: "assets/player/left-lower-arm.png",
-  rightUpperArm: "assets/player/right-upper-arm.png",
-  rightLowerArm: "assets/player/right-lower-arm.png",
-  leftHand: "assets/player/left-hand.png",
-  rightHand: "assets/player/right-hand.png",
-  leftThigh: "assets/player/left-thigh.png",
-  leftShin: "assets/player/left-shin.png",
-  rightThigh: "assets/player/right-thigh.png",
-  rightShin: "assets/player/right-shin.png",
+  leftUpperArm: "assets/player/left_upper_arm.png",
+  leftLowerArm: "assets/player/left_lower_arm.png",
+  rightUpperArm: "assets/player/right_upper_arm.png",
+  rightLowerArm: "assets/player/right_lower_arm.png",
+  leftHand: "assets/player/left_hand.png",
+  rightHand: "assets/player/right_hand.png",
+  leftThigh: "assets/player/left_thigh.png",
+  leftShin: "assets/player/left_shin.png",
+  rightThigh: "assets/player/right_thigh.png",
+  rightShin: "assets/player/right_shin.png",
   hips: "assets/player/hips.png",
   belt: "assets/player/belt.png",
-  chalkBagSprite: "assets/player/chalk-bag.png",
-  chalkBag01: "assets/player/outfit/chalk-bag-01.png",
-  chalkBag02: "assets/player/outfit/chalk-bag-02.png",
-  leftFoot: "assets/player/left-foot.png",
-  rightFoot: "assets/player/right-foot.png"
+  chalkBagSprite: "assets/player/chalk_bag.png",
+  chalkBag01: "assets/player/outfit/chalk_bag_01.png",
+  chalkBag02: "assets/player/outfit/chalk_bag_02.png",
+  leftFoot: "assets/player/left_foot.png",
+  rightFoot: "assets/player/right_foot.png"
 };
 
 const UI_ICON_FILES = {
-  back: "assets/ui/icon-back.png",
-  skin: "assets/ui/icon-skin.png?v=20260710-shirt-1",
-  restart: "assets/ui/icon-restart.png",
-  rank: "assets/ui/icon-rank.png",
-  soundOn: "assets/ui/icon-sound-on.png",
-  soundOff: "assets/ui/icon-sound-off.png",
-  share: "assets/ui/icon-share.png"
+  back: "assets/ui/icon_back.png",
+  skin: "assets/ui/icon_skin.png?v=20260710-shirt-1",
+  restart: "assets/ui/icon_restart.png",
+  rank: "assets/ui/icon_rank.png",
+  soundOn: "assets/ui/icon_sound_on.png",
+  soundOff: "assets/ui/icon_sound_off.png",
+  share: "assets/ui/icon_share.png"
 };
 
 const FIGMA_UI_ASSET_FILES = {
-  coverTitle: "assets/ui/figma/cover-title.png?v=20260712-figma-cover-1",
-  startButton: "assets/ui/figma/btn-start.png?v=20260712-figma-cover-1",
-  outfitButton: "assets/ui/figma/btn-outfit.png?v=20260712-figma-cover-1",
-  rankButton: "assets/ui/figma/btn-rank.png?v=20260712-figma-cover-1",
-  magnet: "assets/ui/figma/powerup-magnet.png?v=20260712-figma-cover-1",
-  magnifier: "assets/ui/figma/powerup-magnifier.png?v=20260712-figma-cover-1"
+  coverTitle: "assets/ui/figma/cover_title.png?v=20260712-figma-cover-1",
+  startButton: "assets/ui/figma/btn_start.png?v=20260712-figma-cover-1",
+  outfitButton: "assets/ui/figma/btn_outfit.png?v=20260712-figma-cover-1",
+  rankButton: "assets/ui/figma/btn_rank.png?v=20260712-figma-cover-1",
+  magnet: "assets/ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
+  magnifier: "assets/ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1"
 };
 const FEEDBACK_ASSET_FILES = {
-  good: "assets/ui/feedback/feedback-good.png?v=20260710-feedback-2",
-  risky: "assets/ui/feedback/feedback-risky.png?v=20260710-feedback-2",
-  precise: "assets/ui/feedback/feedback-precise.png?v=20260710-feedback-2",
-  combo2: "assets/ui/feedback/combo-2.png?v=20260710-feedback-2",
-  combo3: "assets/ui/feedback/combo-3.png?v=20260710-feedback-2",
-  combo4: "assets/ui/feedback/combo-4.png?v=20260710-feedback-2",
-  combo5: "assets/ui/feedback/combo-5.png?v=20260710-feedback-2",
-  combo6: "assets/ui/feedback/combo-6.png?v=20260710-feedback-2",
-  combo7: "assets/ui/feedback/combo-7.png?v=20260710-feedback-2",
-  combo8: "assets/ui/feedback/combo-8.png?v=20260710-feedback-2",
-  combo9: "assets/ui/feedback/combo-9.png?v=20260710-feedback-2",
-  combo10: "assets/ui/feedback/combo-10.png?v=20260710-feedback-2",
-  combo11: "assets/ui/feedback/combo-11.png?v=20260713-combo11-20",
-  combo12: "assets/ui/feedback/combo-12.png?v=20260713-combo11-20",
-  combo13: "assets/ui/feedback/combo-13.png?v=20260713-combo11-20",
-  combo14: "assets/ui/feedback/combo-14.png?v=20260713-combo11-20",
-  combo15: "assets/ui/feedback/combo-15.png?v=20260713-combo11-20",
-  combo16: "assets/ui/feedback/combo-16.png?v=20260713-combo11-20",
-  combo17: "assets/ui/feedback/combo-17.png?v=20260713-combo11-20",
-  combo18: "assets/ui/feedback/combo-18.png?v=20260713-combo11-20",
-  combo19: "assets/ui/feedback/combo-19.png?v=20260713-combo11-20",
-  combo20: "assets/ui/feedback/combo-20.png?v=20260713-combo11-20"
+  good: "assets/ui/feedback/feedback_good.png?v=20260710-feedback-2",
+  risky: "assets/ui/feedback/feedback_risky.png?v=20260710-feedback-2",
+  precise: "assets/ui/feedback/feedback_precise.png?v=20260710-feedback-2",
+  combo2: "assets/ui/feedback/combo_2.png?v=20260710-feedback-2",
+  combo3: "assets/ui/feedback/combo_3.png?v=20260710-feedback-2",
+  combo4: "assets/ui/feedback/combo_4.png?v=20260710-feedback-2",
+  combo5: "assets/ui/feedback/combo_5.png?v=20260710-feedback-2",
+  combo6: "assets/ui/feedback/combo_6.png?v=20260710-feedback-2",
+  combo7: "assets/ui/feedback/combo_7.png?v=20260710-feedback-2",
+  combo8: "assets/ui/feedback/combo_8.png?v=20260710-feedback-2",
+  combo9: "assets/ui/feedback/combo_9.png?v=20260710-feedback-2",
+  combo10: "assets/ui/feedback/combo_10.png?v=20260710-feedback-2",
+  combo11: "assets/ui/feedback/combo_11.png?v=20260713-combo11-20",
+  combo12: "assets/ui/feedback/combo_12.png?v=20260713-combo11-20",
+  combo13: "assets/ui/feedback/combo_13.png?v=20260713-combo11-20",
+  combo14: "assets/ui/feedback/combo_14.png?v=20260713-combo11-20",
+  combo15: "assets/ui/feedback/combo_15.png?v=20260713-combo11-20",
+  combo16: "assets/ui/feedback/combo_16.png?v=20260713-combo11-20",
+  combo17: "assets/ui/feedback/combo_17.png?v=20260713-combo11-20",
+  combo18: "assets/ui/feedback/combo_18.png?v=20260713-combo11-20",
+  combo19: "assets/ui/feedback/combo_19.png?v=20260713-combo11-20",
+  combo20: "assets/ui/feedback/combo_20.png?v=20260713-combo11-20"
 };
 
 const AUDIO_FILES = {
-  bgm: "assets/audio/bgm1.mp3?v=20260710-grip-glide",
-  grabSuccess: "assets/audio/grab-success.ogg?v=20260711-bubble-ogg-1",
-  charge: "assets/audio/charge.mp3?v=20260711-charge-1",
-  powerUp: "assets/audio/power-up.mp3?v=20260711-powerup-1",
-  miss: "assets/audio/miss.ogg?v=20260711-miss-1"
+  bgm: "assets/audio/bgm_main.mp3?v=20260716-original-2",
+  grabSuccess: "assets/audio/sfx_grab_success.mp3?v=20260716-optimized-1",
+  charge: "assets/audio/sfx_charge.mp3?v=20260716-optimized-1",
+  powerUp: "assets/audio/sfx_power_up.mp3?v=20260716-optimized-1",
+  miss: "assets/audio/sfx_miss.mp3?v=20260716-optimized-1"
 };
 
 const DEFAULT_OUTFIT = {
@@ -2085,7 +2075,7 @@ class AudioManager {
     this.bgm = this.createAudio(files.bgm, {
       loop: true,
       volume: 0.07,
-      preload: "auto"
+      preload: "none"
     });
     this.initContext();
   }
@@ -2209,7 +2199,7 @@ class AudioManager {
   }
 
   playBgm() {
-    if (!this.enabled) {
+    if (!this.enabled || !this.unlocked) {
       return;
     }
     const playPromise = this.bgm.play();
@@ -2593,9 +2583,7 @@ class Game {
     ];
     const tasks = [
       () => this.holdAssets.readyPromise,
-      ...imageAssets.map((asset) => () => waitForImageAsset(asset)),
-      () => waitForAudioAsset(this.audio.bgm),
-      () => this.audio.preload()
+      ...imageAssets.map((asset) => () => waitForImageAsset(asset))
     ];
     this.loadingTotal = Math.max(1, tasks.length);
     this.loadingLoaded = 0;
