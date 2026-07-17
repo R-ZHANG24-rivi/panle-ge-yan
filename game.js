@@ -6011,7 +6011,7 @@ class Game {
           { id: "share", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size, y }
         ]
       : (() => {
-          const ids = ["skin", "restart", "rank", "sound", "share"];
+          const ids = ["skin", "rank", "sound", "share"];
           const marginRight = CONFIG.safeSide + 4;
           const totalW = ids.length * size + (ids.length - 1) * gap;
           let x = CONFIG.logicalWidth - marginRight - totalW;
