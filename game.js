@@ -260,7 +260,8 @@ const FIGMA_UI_ASSET_FILES = {
   rankButton: "assets/ui/figma/btn_rank.png?v=20260712-figma-cover-1",
   rankingTitle: "assets/ui/figma/ranking_title.png?v=20260717-figma-title-1",
   magnet: "assets/ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
-  magnifier: "assets/ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1"
+  magnifier: "assets/ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1",
+  tutorialHand: "assets/ui/tutorial_hand.png?v=20260717-tutorial-hand"
 };
 const FEEDBACK_ASSET_FILES = {
   good: "assets/ui/feedback/feedback_good.png?v=20260710-feedback-2",
@@ -288,7 +289,7 @@ const FEEDBACK_ASSET_FILES = {
 };
 
 const AUDIO_FILES = {
-  bgm: "assets/audio/bgm_main.mp3?v=20260716-original-2",
+  bgm: "assets/audio/bgm_main.mp3?v=20260717-new-bgm",
   grabSuccess: "assets/audio/sfx_grab_success.mp3?v=20260716-optimized-1",
   charge: "assets/audio/sfx_charge.mp3?v=20260716-optimized-1",
   powerUp: "assets/audio/sfx_power_up.mp3?v=20260716-optimized-1",
@@ -3028,6 +3029,7 @@ class Game {
         }
       } else if (this.player.updateAutoBelayDescent(deltaTime, this.camera.y)) {
         this.finalizeGameOver();
+        this.gameOverStage = "ranking";
       }
     }
   }
@@ -3125,7 +3127,7 @@ class Game {
       return;
     }
     if (id === "gameover-close") {
-      this.enterStartScreen();
+      this.resetGame({ switchTheme: true });
       return;
     }
     if (id === "sound") {
@@ -6379,8 +6381,7 @@ class Game {
     const closeRect = { x: panelX + panelW - 47, y: panelY - 9, w: 42, h: 42 };
     if (fromGameOver) {
       this.uiButtons = [
-        { id: "gameover-close", ...closeRect },
-        { id: "gameover-restart", x: 111, y: 770, w: 153, h: 34 }
+        { id: "gameover-close", ...closeRect }
       ];
     } else {
       this.uiPanel.bounds = { x: panelX, y: panelY - 45, w: panelW, h: panelH + 45 };
@@ -6440,17 +6441,6 @@ class Game {
     ctx.lineTo(closeRect.x + 13, closeRect.y + 29);
     ctx.stroke();
 
-    if (fromGameOver) {
-      const restart = this.uiButtons.find((button) => button.id === "gameover-restart");
-      ctx.fillStyle = "#4bb7ef";
-      this.roundRect(ctx, restart.x, restart.y, restart.w, restart.h, 21);
-      ctx.fill();
-      ctx.fillStyle = "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = '900 17px "PingFang SC", sans-serif';
-      ctx.fillText("再玩一次", restart.x + restart.w / 2, restart.y + restart.h / 2);
-    }
     ctx.restore();
   }
 
@@ -7013,62 +7003,25 @@ class Game {
   }
 
   drawTutorialHand(ctx, x, y) {
+    const handSize = 68;
     ctx.save();
     ctx.translate(0, 1);
-    ctx.shadowColor = "rgba(8, 35, 45, 0.42)";
-    ctx.shadowBlur = 8;
-    ctx.shadowOffsetY = 4;
-    ctx.beginPath();
-    ctx.moveTo(x - 12, y + 31);
-    ctx.lineTo(x - 18, y + 11);
-    ctx.quadraticCurveTo(x - 22, y + 2, x - 17, y - 3);
-    ctx.quadraticCurveTo(x - 13, y - 7, x - 9, y - 1);
-    ctx.lineTo(x - 5, y + 5);
-    ctx.lineTo(x - 5, y - 28);
-    ctx.quadraticCurveTo(x - 5, y - 37, x + 1, y - 37);
-    ctx.quadraticCurveTo(x + 7, y - 37, x + 7, y - 28);
-    ctx.lineTo(x + 7, y - 10);
-    ctx.quadraticCurveTo(x + 8, y - 17, x + 14, y - 17);
-    ctx.quadraticCurveTo(x + 20, y - 17, x + 20, y - 10);
-    ctx.lineTo(x + 20, y - 6);
-    ctx.quadraticCurveTo(x + 22, y - 12, x + 27, y - 11);
-    ctx.quadraticCurveTo(x + 33, y - 10, x + 32, y - 3);
-    ctx.lineTo(x + 32, y + 1);
-    ctx.quadraticCurveTo(x + 35, y - 4, x + 40, y - 1);
-    ctx.quadraticCurveTo(x + 44, y + 2, x + 40, y + 10);
-    ctx.lineTo(x + 32, y + 24);
-    ctx.quadraticCurveTo(x + 26, y + 34, x + 12, y + 35);
-    ctx.lineTo(x + 1, y + 35);
-    ctx.quadraticCurveTo(x - 8, y + 35, x - 12, y + 31);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = "rgba(35, 70, 83, 0.96)";
-    ctx.lineWidth = 3.2;
-    ctx.lineJoin = "round";
-    ctx.stroke();
-
-    ctx.strokeStyle = "rgba(49, 95, 114, 0.52)";
-    ctx.lineWidth = 1.6;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(x + 8, y - 5);
-    ctx.lineTo(x + 8, y + 7);
-    ctx.moveTo(x + 20, y - 3);
-    ctx.lineTo(x + 20, y + 8);
-    ctx.moveTo(x + 32, y + 3);
-    ctx.lineTo(x + 31, y + 11);
-    ctx.moveTo(x - 8, y + 24);
-    ctx.quadraticCurveTo(x + 8, y + 28, x + 27, y + 24);
-    ctx.stroke();
-
-    ctx.strokeStyle = "rgba(49, 95, 114, 0.78)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x - 9, y + 30);
-    ctx.quadraticCurveTo(x + 9, y + 35, x + 28, y + 29);
-    ctx.stroke();
+    ctx.shadowColor = "rgba(8, 35, 45, 0.30)";
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 6;
+    const asset = this.figmaUiAssets && this.figmaUiAssets.tutorialHand;
+    if (asset && asset.image) {
+      this.drawImageAssetContain(ctx, asset, x - handSize / 2, y - handSize / 2 - 8, handSize, handSize);
+    } else {
+      // fallback: 简单圆形占位（资源未加载时）
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(x, y - 10, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(35, 70, 83, 0.96)";
+      ctx.lineWidth = 3.2;
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
