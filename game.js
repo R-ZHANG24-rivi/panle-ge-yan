@@ -209,6 +209,7 @@ const PLAYER_ASSET_FILES = {
   fallingPose: "assets/player/falling_pose.png",
   climbingPose: "assets/player/climbing_pose.png",
   headFront: "assets/player/head_front.png",
+  headFrontHappy: "assets/player/head_front_happy.png?v=20260717-figma-0.75",
   headBack: "assets/player/head_back.png",
   hair02Front: "assets/player/outfit/hair_02_front.png",
   hair02Back: "assets/player/outfit/hair_02_back.png",
@@ -217,6 +218,7 @@ const PLAYER_ASSET_FILES = {
   hairMaleFront: "assets/player/outfit/hair_male_front.png",
   hairMaleBack: "assets/player/outfit/hair_male_back.png",
   headMaleFront: "assets/player/outfit/head_male_back.png",
+  headMaleFrontHappy: "assets/player/outfit/head_male_front_happy.png?v=20260717-figma-0.75",
   glasses01: "assets/player/outfit/glasses_01.png",
   shirt: "assets/player/shirt.png?v=20260708-rounded",
   shirtFemale: "assets/player/outfit/shirt_female.png",
@@ -2656,13 +2658,13 @@ class Game {
     this.climbHeight = 0;
     this.livesRemaining = CONFIG.maxLives;
     this.recoveringFromMiss = false;
-    this.tutorialDismissed = false;
+    this.tutorialDismissed = !!localStorage.getItem("climbGame_tutorial_completed");
     this.tutorialPhase = "hold";
     this.tutorialTargetCharge = 0.62;
     this.tutorialEarlyRelease = false;
     this.tutorialCompletionPending = false;
     this.tutorialCompleteTime = 0;
-    this.tutorialCompleteDuration = 6;
+    this.tutorialCompleteDuration = 3;
     this.roundElapsed = 0;
     this.finalRoundDuration = 0;
     this.gameOverStage = "summary";
@@ -3486,6 +3488,7 @@ class Game {
     if (this.tutorialCompletionPending) {
       this.tutorialCompletionPending = false;
       this.tutorialCompleteTime = this.tutorialCompleteDuration;
+      localStorage.setItem("climbGame_tutorial_completed", "1");
     }
     if (grabbedPowerUp) {
       this.activatePowerUp(grabbedPowerUp);
@@ -5417,14 +5420,24 @@ class Game {
     }
     if (isFront && this.outfit && this.outfit.hair === "hair_male" && this.playerAssets.isReady("headMaleFront")) {
       const yOffset = 3;
-      this.drawEndpointSprite(ctx, "headMaleFront", { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
+      // 试衣间预览态用开心表情，其余（攀爬/下落）保持原表情
+      const maleDrawName =
+        this._outfitPreviewMode && this.playerAssets.isReady("headMaleFrontHappy")
+          ? "headMaleFrontHappy"
+          : "headMaleFront";
+      this.drawEndpointSprite(ctx, maleDrawName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitGlasses(ctx, head, true, yOffset);
       return;
     }
     const assetName = isFront ? "headFront" : "headBack";
     if (this.playerAssets.isReady(assetName)) {
       const yOffset = isFront ? 3 : 1;
-      this.drawEndpointSprite(ctx, assetName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
+      // 试衣间预览态用开心表情，其余（攀爬/下落）保持原表情
+      const drawName =
+        isFront && this._outfitPreviewMode && this.playerAssets.isReady("headFrontHappy")
+          ? "headFrontHappy"
+          : assetName;
+      this.drawEndpointSprite(ctx, drawName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitHair(ctx, head, isFront, yOffset);
       this.drawOutfitGlasses(ctx, head, isFront, yOffset);
       return;
@@ -5722,7 +5735,10 @@ class Game {
     ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 118, CONFIG.safeTop + 84);
     ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 292, CONFIG.safeTop + 84);
 
-    this.drawChargeBar(ctx);
+    // 弧形蓄力条：仅在玩家按住蓄力时出现，不点击不显示
+    if (this.state === STATE.CHARGING) {
+      this.drawChargeBar(ctx);
+    }
   }
 
   drawLives(ctx, x, y) {
@@ -5955,49 +5971,112 @@ class Game {
     }
   }
 
+  // 弧形蓄力条几何：一段向上凸起的圆弧（拱形 ∩），悬在小人抓握手上方、跨在绳子上。
+  // 返回弧心、半径、起止角，供绘制与新手目标标记复用。
+  getChargeArcGeometry() {
+    const cx = CONFIG.logicalWidth / 2;      // 弧心 X：屏幕中线
+    const cy = 545;                          // 弧心 Y：在小人抓握手下方，使拱顶悬在手上方（实机校准）
+    const radius = 110;                      // 弧半径（越小曲率越大，拱越弯）
+    const spread = 1.12;                     // 半张角（弧度），越大弧度越圆（拱更弯）
+    // Canvas 坐标 y 向下：拱顶正上方对应角度 -π/2。
+    // 从左端(-π+spread) 递增扫到右端(-spread)，中间经过拱顶。
+    const startAngle = -Math.PI + spread;    // 左端
+    const endAngle = -spread;                // 右端
+    return { cx, cy, radius, startAngle, endAngle };
+  }
+
+  // 沿弧线取参数 t(0~1) 对应的点坐标（t=0 左端 → t=1 右端）
+  chargeArcPointAt(t) {
+    const { cx, cy, radius, startAngle, endAngle } = this.getChargeArcGeometry();
+    const angle = startAngle + (endAngle - startAngle) * clamp(t, 0, 1);
+    return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius, angle };
+  }
+
   drawChargeBar(ctx) {
-    const w = CONFIG.logicalWidth * 0.78;
-    const h = 27;
-    const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - CONFIG.safeBottom - 36;
-    const innerPad = 5;
-    const innerX = x + innerPad;
-    const innerY = y + innerPad;
-    const innerW = w - innerPad * 2;
-    const innerH = h - innerPad * 2;
+    const { cx, cy, radius, startAngle, endAngle } = this.getChargeArcGeometry();
+    const band = 15;                         // 弧带宽度
+    const outerR = radius + band / 2;
+    const innerR = radius - band / 2;
 
-    ctx.fillStyle = "rgba(255,255,255,0.96)";
-    this.roundRect(ctx, x, y, w, h, h / 2);
-    ctx.fill();
-    ctx.fillStyle = THEME.charge.base;
-    this.roundRect(ctx, innerX, innerY, innerW, innerH, innerH / 2);
-    ctx.fill();
+    ctx.save();
+    ctx.lineCap = "round";
 
-    const fillW = innerW * this.charge;
-    if (fillW > 0.5) {
-      ctx.save();
-      this.roundRect(ctx, innerX, innerY, fillW, innerH, innerH / 2);
-      ctx.clip();
-      const gradient = ctx.createLinearGradient(innerX, 0, innerX + innerW, 0);
+    // 外框（白色描边胶囊弧）
+    ctx.strokeStyle = "rgba(255,255,255,0.98)";
+    ctx.lineWidth = band + 7;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+    ctx.stroke();
+
+    // 轨道底色
+    ctx.strokeStyle = THEME.charge.base;
+    ctx.lineWidth = band;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+    ctx.stroke();
+
+    // 蓄力填充（从左端起沿弧线增长，渐变绿→黄→橙→红）
+    const charge = clamp(this.charge, 0, 1);
+    if (charge > 0.01) {
+      const fillEnd = startAngle + (endAngle - startAngle) * charge;
+      const gradient = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy);
       gradient.addColorStop(0, THEME.charge.green);
       gradient.addColorStop(0.45, THEME.charge.yellow);
       gradient.addColorStop(0.68, THEME.charge.orange);
       gradient.addColorStop(1, THEME.charge.red);
-      ctx.fillStyle = gradient;
-      this.roundRect(ctx, innerX, innerY, innerW, innerH, innerH / 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    ctx.strokeStyle = "rgba(255,255,255,0.82)";
-    ctx.lineWidth = 1.2;
-    for (let i = 1; i <= 3; i += 1) {
-      const dividerX = innerX + (innerW * i) / 4;
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = band;
       ctx.beginPath();
-      ctx.moveTo(dividerX, innerY + 2);
-      ctx.lineTo(dividerX, innerY + innerH - 2);
+      ctx.arc(cx, cy, radius, startAngle, fillEnd, false);
       ctx.stroke();
     }
+
+    // 刻度分隔线（3 条，把弧分成 4 段）
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "butt";
+    for (let i = 1; i <= 3; i += 1) {
+      const angle = startAngle + (endAngle - startAngle) * (i / 4);
+      const ca = Math.cos(angle);
+      const sa = Math.sin(angle);
+      ctx.beginPath();
+      ctx.moveTo(cx + ca * (innerR + 1.5), cy + sa * (innerR + 1.5));
+      ctx.lineTo(cx + ca * (outerR - 1.5), cy + sa * (outerR - 1.5));
+      ctx.stroke();
+    }
+
+    // 倒三角力度标注：跟随当前蓄力值沿弧外侧移动，尖端指向弧带
+    const markAngle = startAngle + (endAngle - startAngle) * charge;
+    const ca = Math.cos(markAngle);
+    const sa = Math.sin(markAngle);
+    const tipR = outerR + 1;                 // 三角尖端（贴近弧带外缘）
+    const baseR = outerR + 17;               // 三角底边（更外侧）
+    const tipX = cx + ca * tipR;
+    const tipY = cy + sa * tipR;
+    // 沿弧的切向方向作为三角底边展开方向
+    const tangX = -sa;
+    const tangY = ca;
+    const half = 8.5;                        // 三角底边半宽
+    const bcx = cx + ca * baseR;
+    const bcy = cy + sa * baseR;
+    // 三角填充色跟随蓄力档位（与弧带渐变一致的感觉）
+    const markColor =
+      charge < 0.45 ? THEME.charge.green :
+      charge < 0.68 ? THEME.charge.yellow :
+      charge < 0.9 ? THEME.charge.orange : THEME.charge.red;
+    ctx.beginPath();
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(bcx + tangX * half, bcy + tangY * half);
+    ctx.lineTo(bcx - tangX * half, bcy - tangY * half);
+    ctx.closePath();
+    ctx.fillStyle = markColor;
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.restore();
   }
 
   drawUiControls(ctx) {
@@ -6608,6 +6687,7 @@ class Game {
       animTime: this.player.animTime
     };
     this.camera.y = 0;
+    this._outfitPreviewMode = true;   // 标记：试衣间预览态，drawHead 用开心表情
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
@@ -6727,6 +6807,7 @@ class Game {
     this.player.bodyAngle = previous.bodyAngle;
     this.player.frontFacingAmount = previous.frontFacingAmount;
     this.player.animTime = previous.animTime;
+    this._outfitPreviewMode = false;  // 复位：仅试衣间预览用开心表情
     ctx.restore();
   }
 
@@ -6913,33 +6994,34 @@ class Game {
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
     ctx.restore();
 
-    // 遮罩会压暗 HUD，因此重新绘制蓄力条，并在正确松手位置添加目标标记。
+    // 遮罩会压暗 HUD，因此重新绘制弧形蓄力条，并在正确松手位置添加目标标记。
     this.drawChargeBar(ctx);
-    const barW = CONFIG.logicalWidth * 0.78;
-    const barX = (CONFIG.logicalWidth - barW) / 2;
-    const barY = CONFIG.logicalHeight - CONFIG.safeBottom - 36;
-    const innerPad = 5;
-    const targetX = barX + innerPad + (barW - innerPad * 2) * this.tutorialTargetCharge;
+    const target = this.chargeArcPointAt(this.tutorialTargetCharge);
+    const targetX = target.x;
+    const barY = target.y;
+    // 标记朝向弧外的法线方向（用于引出短线与文字位置）
+    const nx = Math.cos(target.angle);
+    const ny = Math.sin(target.angle);
 
     ctx.save();
     ctx.shadowColor = "rgba(255, 255, 255, 0.82)";
     ctx.shadowBlur = 10 + pulse * 8;
     ctx.fillStyle = isReleaseStep ? "#ffffff" : "#ffcf47";
     ctx.beginPath();
-    ctx.arc(targetX, barY + 13.5, 5.5 + pulse * 1.5, 0, Math.PI * 2);
+    ctx.arc(targetX, barY, 5.5 + pulse * 1.5, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = "rgba(49, 95, 114, 0.82)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(targetX, barY - 14);
-    ctx.lineTo(targetX, barY + 4);
+    ctx.moveTo(targetX + nx * 12, barY + ny * 12);
+    ctx.lineTo(targetX + nx * 30, barY + ny * 30);
     ctx.stroke();
     ctx.fillStyle = isReleaseStep ? "rgba(255, 255, 255, 0.96)" : "#ffcf47";
     ctx.font = "900 12px Arial, Helvetica, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText(isReleaseStep ? "到位，松手" : "蓄力到这里", targetX, barY - 17);
+    ctx.fillText(isReleaseStep ? "到位，松手" : "蓄力到这里", targetX + nx * 34, barY + ny * 34);
     ctx.restore();
 
     ctx.save();
@@ -7031,11 +7113,11 @@ class Game {
     const enterT = easeOutCubic(clamp(elapsed / 0.28, 0, 1));
     const exitT = clamp(this.tutorialCompleteTime / 0.45, 0, 1);
     const alpha = Math.min(enterT, exitT);
-    const yOffset = lerp(26, 0, enterT);
+    const yOffset = lerp(-26, 0, enterT);
     const x = 24;
-    const y = 438 + yOffset;
+    const y = 96 + yOffset;
     const w = CONFIG.logicalWidth - 48;
-    const h = 214;
+    const h = 236;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -7076,12 +7158,15 @@ class Game {
     ctx.font = "bold 14px Arial, Helvetica, sans-serif";
     ctx.fillText("根据下一个发光岩点判断出手力度，", CONFIG.logicalWidth / 2, y + 70);
     ctx.fillText("继续攀爬吧！", CONFIG.logicalWidth / 2, y + 90);
+    ctx.fillStyle = "#ff7a3c";
+    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    ctx.fillText("力度过小或过大都有可能导致小人掉落哦～", CONFIG.logicalWidth / 2, y + 112);
 
     ctx.strokeStyle = "rgba(49, 95, 114, 0.12)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x + 28, y + 108);
-    ctx.lineTo(x + w - 28, y + 108);
+    ctx.moveTo(x + 28, y + 130);
+    ctx.lineTo(x + w - 28, y + 130);
     ctx.stroke();
 
     const itemCenters = [x + w * 0.27, x + w * 0.73];
@@ -7090,13 +7175,13 @@ class Game {
       const type = itemTypes[index];
       const centerX = itemCenters[index];
       const asset = this.figmaUiAssets && this.figmaUiAssets[type];
-      this.drawImageAssetContain(ctx, asset, centerX - 28, y + 116, 56, 44);
+      this.drawImageAssetContain(ctx, asset, centerX - 28, y + 138, 56, 44);
       ctx.fillStyle = POWER_UPS[type].color;
       ctx.font = "900 15px Arial, Helvetica, sans-serif";
-      ctx.fillText(POWER_UPS[type].label, centerX, y + 170);
+      ctx.fillText(POWER_UPS[type].label, centerX, y + 192);
       ctx.fillStyle = "#657a82";
       ctx.font = "bold 12px Arial, Helvetica, sans-serif";
-      ctx.fillText(type === "magnifier" ? "判定范围扩大 10 秒" : "自动吸附岩点 5 秒", centerX, y + 192);
+      ctx.fillText(type === "magnifier" ? "判定范围扩大 10 秒" : "自动吸附岩点 5 秒", centerX, y + 214);
     }
     ctx.restore();
   }
