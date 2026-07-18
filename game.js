@@ -2658,11 +2658,15 @@ class Game {
     this.climbHeight = 0;
     this.livesRemaining = CONFIG.maxLives;
     this.recoveringFromMiss = false;
-    this.tutorialDismissed = !!localStorage.getItem("climbGame_tutorial_completed");
+    const tutorialEnabled = options.tutorialEnabled ?? !localStorage.getItem("climbGame_tutorial_completed");
+    this.tutorialActive = tutorialEnabled;
+    this.tutorialDismissed = !tutorialEnabled;
     this.tutorialPhase = "hold";
     this.tutorialTargetCharge = 0.62;
     this.tutorialEarlyRelease = false;
     this.tutorialCompletionPending = false;
+    this.tutorialAttemptPending = false;
+    this.tutorialCompletionShown = false;
     this.tutorialCompleteTime = 0;
     this.tutorialCompleteDuration = 3;
     this.roundElapsed = 0;
@@ -2689,6 +2693,7 @@ class Game {
     this.currentHold = this.routeHolds[0];
     this.targetHold = this.routeHolds[1];
     this.tutorialTargetCharge = this.calculateTutorialTargetCharge();
+    this.tutorialCompleteAwaitingDismiss = false;
     this.previousHold = null;
     this.settlePlayerPose(null, "far");
     this.camera.snapToPlayer(this.player);
@@ -2915,7 +2920,7 @@ class Game {
         this.feedback = null;
       }
     }
-    if (this.tutorialCompleteTime > 0) {
+    if (this.tutorialCompleteTime > 0 && !this.tutorialCompleteAwaitingDismiss) {
       this.tutorialCompleteTime = Math.max(0, this.tutorialCompleteTime - deltaTime);
     }
     this.updatePowerUps(deltaTime);
@@ -3031,7 +3036,6 @@ class Game {
         }
       } else if (this.player.updateAutoBelayDescent(deltaTime, this.camera.y)) {
         this.finalizeGameOver();
-        this.gameOverStage = "ranking";
       }
     }
   }
@@ -3040,6 +3044,10 @@ class Game {
       return;
     }
     this.audio.unlock();
+    if (this.tutorialCompleteTime > 0) {
+      this.dismissTutorialComplete();
+      return;
+    }
     if (this.state === STATE.START) {
       return;
     }
@@ -3065,6 +3073,10 @@ class Game {
       return true;
     }
     this.audio.unlock();
+    if (this.tutorialCompleteTime > 0) {
+      this.dismissTutorialComplete();
+      return true;
+    }
     if (this.uiPanel) {
       if (this.uiPanel.closeRect && this.pointInRect(point, this.uiPanel.closeRect)) {
         this.uiPanel = null;
@@ -3104,6 +3116,10 @@ class Game {
   activateUiButton(id) {
     if (id === "play") {
       this.startGame();
+      return;
+    }
+    if (id === "tutorial") {
+      this.startTutorialGame();
       return;
     }
     if (id === "restart") {
@@ -3174,6 +3190,10 @@ class Game {
     }
   }
 
+  startTutorialGame() {
+    this.resetGame({ tutorialEnabled: true });
+  }
+
   showToast(message) {
     this.uiToast = message;
     this.uiToastTime = 1.6;
@@ -3198,7 +3218,7 @@ class Game {
   }
 
   beginCharge() {
-    const isTutorialCharge = this.holdCount === 0 && !this.tutorialDismissed;
+    const isTutorialCharge = this.holdCount === 0 && this.tutorialActive;
     if (isTutorialCharge) {
       this.tutorialPhase = "charging";
       this.tutorialEarlyRelease = false;
@@ -3215,7 +3235,7 @@ class Game {
     this.state = STATE.CHARGING;
   }
   updateCharge(deltaTime) {
-    const isTutorialCharge = this.holdCount === 0 && !this.tutorialDismissed;
+    const isTutorialCharge = this.holdCount === 0 && this.tutorialActive;
     if (isTutorialCharge) {
       if (this.tutorialPhase === "release") {
         this.charge = this.tutorialTargetCharge;
@@ -3257,14 +3277,16 @@ class Game {
     if (this.state !== STATE.CHARGING) {
       return;
     }
-    if (this.holdCount === 0 && !this.tutorialDismissed && this.tutorialPhase !== "release") {
+    if (this.holdCount === 0 && this.tutorialActive && this.tutorialPhase !== "release") {
       this.tutorialEarlyRelease = true;
       this.resetTutorialCharge();
       return;
     }
     this.audio.stopCharge();
-    if (this.holdCount === 0 && !this.tutorialDismissed) {
+    if (this.holdCount === 0 && this.tutorialActive) {
       this.tutorialCompletionPending = true;
+      this.tutorialAttemptPending = true;
+      this.tutorialActive = false;
       this.tutorialDismissed = true;
       this.tutorialPhase = "done";
     }
@@ -3273,7 +3295,7 @@ class Game {
 
   handlePressCancel() {
     if (this.state === STATE.CHARGING) {
-      if (this.holdCount === 0 && !this.tutorialDismissed) {
+      if (this.holdCount === 0 && this.tutorialActive) {
         this.resetTutorialCharge();
         return;
       }
@@ -3312,7 +3334,9 @@ class Game {
   }
 
   startAttempt() {
-    const attempt = this.judgeAttempt();
+    const isTutorialAttempt = this.tutorialAttemptPending;
+    this.tutorialAttemptPending = false;
+    const attempt = isTutorialAttempt ? this.createStartDemoAttempt() : this.judgeAttempt();
     const actionType = attempt.targetDistance <= CONFIG.nearMoveThreshold ? "near" : "far";
     this.lastAttempt = attempt;
     this.animationResult = attempt;
@@ -3487,8 +3511,9 @@ class Game {
     this.climbHeight = this.calculateClimbHeightFromCurrentHold();
     if (this.tutorialCompletionPending) {
       this.tutorialCompletionPending = false;
-      this.tutorialCompleteTime = this.tutorialCompleteDuration;
-      localStorage.setItem("climbGame_tutorial_completed", "1");
+      if (!this.tutorialCompletionShown) {
+        this.showTutorialComplete();
+      }
     }
     if (grabbedPowerUp) {
       this.activatePowerUp(grabbedPowerUp);
@@ -3666,6 +3691,7 @@ class Game {
   }
   finishMissRecovery() {
     this.recoveringFromMiss = false;
+    this.tutorialActive = false;
     this.tutorialDismissed = true;
     this.failureReason = "";
     const actionType = this.pendingAttempt ? this.pendingAttempt.actionType : "far";
@@ -3683,6 +3709,22 @@ class Game {
       this.state = STATE.READY;
     }
   }
+  showTutorialComplete() {
+    this.tutorialCompletionShown = true;
+    this.tutorialCompleteTime = this.tutorialCompleteDuration;
+    this.tutorialCompleteAwaitingDismiss = true;
+    localStorage.setItem("climbGame_tutorial_completed", "1");
+  }
+
+  dismissTutorialComplete() {
+    this.tutorialCompleteTime = 0;
+    this.tutorialCompleteAwaitingDismiss = false;
+    if (this.pendingAttempt && this.pendingAttempt.scoreConfirmed) {
+      this.completePostGrabPresentation();
+      this.state = STATE.READY;
+    }
+  }
+
   finalizeGameOver() {
     this.finalizeRoundScore();
     this.state = STATE.GAME_OVER;
@@ -4033,7 +4075,7 @@ class Game {
       } else if (
         this.holdCount === 0
         && [STATE.READY, STATE.CHARGING].includes(this.state)
-        && !this.tutorialDismissed
+        && this.tutorialActive
       ) {
         this.drawStartHint(ctx);
       }
@@ -6086,6 +6128,7 @@ class Game {
     const buttons = this.state === STATE.START
       ? [
           { id: "back", x: CONFIG.safeSide + 4, y },
+          { id: "tutorial", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 3 - gap * 2, y },
           { id: "sound", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 2 - gap, y },
           { id: "share", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size, y }
         ]
@@ -6115,7 +6158,8 @@ class Game {
         ctx.fill();
         ctx.fillStyle = "#bdf7ff";
         ctx.beginPath();
-        ctx.arc(cx, cy, size / 2 - 6, 0, Math.PI * 2);
+        const innerInset = id === "tutorial" ? 4 : 6;
+        ctx.arc(cx, cy, size / 2 - innerInset, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
         ctx.lineWidth = 1.5;
@@ -6196,6 +6240,11 @@ class Game {
       ctx.lineTo(cx - 8, cy + 12);
       ctx.closePath();
       ctx.stroke();
+    } else if (id === "tutorial") {
+      ctx.font = "900 24px Arial, Helvetica, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("?", cx, cy + 1);
     } else if (id === "sound") {
       if (this.soundMuted) {
         ctx.lineWidth = 4.2;
@@ -6252,6 +6301,7 @@ class Game {
     ctx.drawImage(image, x + (w - drawW) / 2, y + (h - drawH) / 2, drawW, drawH);
     return true;
   }
+
 
   drawFigmaStartButton(ctx, id, assetName, x, y, w, h) {
     this.menuButtons.push({ id, x, y, w, h });
@@ -7110,14 +7160,18 @@ class Game {
   drawTutorialComplete(ctx) {
     const duration = this.tutorialCompleteDuration;
     const elapsed = duration - this.tutorialCompleteTime;
-    const enterT = easeOutCubic(clamp(elapsed / 0.28, 0, 1));
-    const exitT = clamp(this.tutorialCompleteTime / 0.45, 0, 1);
+    const enterT = this.tutorialCompleteAwaitingDismiss
+      ? 1
+      : easeOutCubic(clamp(elapsed / 0.28, 0, 1));
+    const exitT = this.tutorialCompleteAwaitingDismiss
+      ? 1
+      : clamp(this.tutorialCompleteTime / 0.45, 0, 1);
     const alpha = Math.min(enterT, exitT);
     const yOffset = lerp(-26, 0, enterT);
     const x = 24;
-    const y = 96 + yOffset;
     const w = CONFIG.logicalWidth - 48;
     const h = 236;
+    const y = (CONFIG.logicalHeight - h) / 2 + yOffset;
 
     ctx.save();
     ctx.globalAlpha = alpha;
