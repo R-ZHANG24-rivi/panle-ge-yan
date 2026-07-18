@@ -104,7 +104,11 @@ const CONFIG = {
   powerUpDurations: {
     magnet: 5,
     magnifier: 10
-  }
+  },
+  autoClimbScoreInterval: 1000,
+  autoClimbDuration: 3,
+  autoClimbSpeed: 2,
+  autoClimbFlashDuration: 0.55
 };
 
 const POWER_UPS = {
@@ -2654,6 +2658,14 @@ class Game {
       magnet: 0,
       magnifier: 0
     };
+    this.autoClimb = {
+      active: false,
+      phase: null,
+      remaining: 0,
+      totalDuration: 0,
+      flashTime: 0,
+      milestone: 0
+    };
     this.holdCount = 0;
     this.climbHeight = 0;
     this.livesRemaining = CONFIG.maxLives;
@@ -2938,6 +2950,11 @@ class Game {
       return;
     }
 
+    if (this.autoClimb.active) {
+      this.updateAutoClimb(deltaTime);
+      return;
+    }
+
     if (this.state === STATE.READY) {
       this.player.updateReadyRest(deltaTime, this.currentHold, this.holdCount > 0, this.generator.getHoldById(this.player.contacts.leftHand), this.generator.getHoldById(this.player.contacts.rightHand));
       return;
@@ -3049,6 +3066,9 @@ class Game {
       return;
     }
     if (this.state === STATE.START) {
+      return;
+    }
+    if (this.autoClimb.active) {
       return;
     }
     if (this.state === STATE.GAME_OVER || this.roundEnded) {
@@ -3489,12 +3509,21 @@ class Game {
     this.feedbackTime = 1.15;
   }
 
+  getCrossedAutoClimbMilestones(previousScore) {
+    const interval = CONFIG.autoClimbScoreInterval;
+    const previousMilestone = Math.floor(Math.max(0, previousScore) / interval);
+    const currentMilestone = Math.floor(Math.max(0, this.score) / interval);
+    return Math.max(0, currentMilestone - previousMilestone);
+  }
+
   confirmSuccessfulGrab() {
     if (this.pendingAttempt.scoreConfirmed) {
       return;
     }
     this.pendingAttempt.scoreConfirmed = true;
+    const previousScore = this.score;
     this.applyAccuracyScore(this.animationResult || this.pendingAttempt);
+    const crossedMilestones = this.getCrossedAutoClimbMilestones(previousScore);
     this.audio.playGrabRank(this.feedback.tier, this.feedback.combo);
     const grabbedPowerUp = this.targetHold.powerUp;
     this.previousHold = this.currentHold;
@@ -3525,6 +3554,170 @@ class Game {
     this.chargeDirection = 1;
     this.poseCharge = 0;
     this.state = STATE.BODY_FOLLOW;
+    if (crossedMilestones > 0 && !this.tutorialActive && !this.roundEnded) {
+      this.beginAutoClimb(crossedMilestones);
+    }
+  }
+
+  beginAutoClimb(milestoneCount = 1) {
+    const addedDuration = Math.max(1, milestoneCount) * CONFIG.autoClimbDuration;
+    this.autoClimb.active = true;
+    this.autoClimb.phase = this.state === STATE.BODY_FOLLOW ? "bodyFollow" : null;
+    this.autoClimb.remaining += addedDuration;
+    this.autoClimb.totalDuration = this.autoClimb.remaining;
+    this.autoClimb.flashTime = CONFIG.autoClimbFlashDuration;
+    this.autoClimb.milestone = Math.floor(this.score / CONFIG.autoClimbScoreInterval);
+    this.pendingRestHand = null;
+    this.player.stopIdleRest();
+    this.audio.playPowerUp();
+    if (!this.autoClimb.phase) {
+      this.beginAutoClimbStep();
+    }
+  }
+
+  updateAutoClimb(deltaTime) {
+    const boost = this.autoClimb;
+    boost.remaining = Math.max(0, boost.remaining - deltaTime);
+    boost.flashTime = Math.max(0, boost.flashTime - deltaTime);
+    const motionDelta = deltaTime * CONFIG.autoClimbSpeed;
+
+    if (boost.phase === "launch") {
+      if (this.player.updateLaunch(motionDelta)) {
+        this.player.beginLeadHandContact(this.targetHold, this.animationResult.releasePoint);
+        this.state = STATE.LEAD_HAND_CONTACT;
+        boost.phase = "contact";
+      }
+      return;
+    }
+
+    if (boost.phase === "contact") {
+      if (this.player.updateTimed(motionDelta) >= 1) {
+        this.confirmAutoClimbGrab();
+      }
+      return;
+    }
+
+    if (boost.phase === "bodyFollow") {
+      this.updateCameraDuringClimb(motionDelta);
+      if (this.player.updateBodyFollow(motionDelta)) {
+        if (this.player.motion.feetSyncActive) {
+          this.player.finishFeetReposition();
+        }
+        this.player.beginTrailingHandMove(this.currentHold, this.pendingAttempt.actionType);
+        this.state = STATE.TRAILING_HAND_MOVE;
+        boost.phase = "trailingHand";
+      }
+      return;
+    }
+
+    if (boost.phase === "trailingHand") {
+      this.updateCameraDuringClimb(motionDelta);
+      if (this.player.updateTrailingHandMove(motionDelta)) {
+        this.player.finishTrailingHandMove(this.currentHold);
+        this.player.beginSettle(this.currentHold);
+        this.state = STATE.SETTLING;
+        boost.phase = "settle";
+      }
+      return;
+    }
+
+    if (boost.phase === "settle") {
+      this.updateCameraDuringClimb(motionDelta);
+      if (this.player.updateSettle(motionDelta)) {
+        this.completeAutoClimbCycle();
+      }
+      return;
+    }
+
+    this.beginAutoClimbStep();
+  }
+
+  beginAutoClimbStep() {
+    this.generator.ensureHoldBuffer(this.currentIndex);
+    this.routeHolds = this.generator.routeHolds;
+    this.currentHold = this.routeHolds[this.currentIndex];
+    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    if (!this.currentHold || !this.targetHold) {
+      this.finishAutoClimb();
+      return;
+    }
+
+    const attempt = this.createStartDemoAttempt();
+    const actionType = attempt.actionType;
+    this.lastAttempt = attempt;
+    this.animationResult = attempt;
+    this.pendingAttempt = {
+      oldHold: this.currentHold,
+      targetHold: this.targetHold,
+      actionType,
+      leadHand: this.player.leadHandName,
+      trailingHand: this.player.trailingHandName,
+      scoreConfirmed: true,
+      handSwitched: false,
+      autoGenerated: true
+    };
+    this.player.actionType = actionType;
+    this.player.beginLaunch(this.currentHold, this.targetHold, attempt, actionType);
+    this.state = STATE.LAUNCHING;
+    this.autoClimb.phase = "launch";
+  }
+
+  confirmAutoClimbGrab() {
+    const grabbedPowerUp = this.targetHold.powerUp;
+    this.previousHold = this.currentHold;
+    this.targetHold.state = "current";
+    this.targetHold.powerUp = null;
+    this.currentHold.state = "grabbed";
+    this.currentIndex += 1;
+    this.currentHold = this.targetHold;
+    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    if (this.targetHold) {
+      this.targetHold.state = "target";
+    }
+    this.holdCount += 1;
+    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
+    if (grabbedPowerUp) {
+      this.activatePowerUp(grabbedPowerUp);
+    }
+
+    const neutral = this.player.getNeutralBodyForHold(this.currentHold);
+    const feet = this.chooseFeetSupportsForBody("front", neutral);
+    this.player.beginBodyFollow(this.currentHold, feet.leftFoot, feet.rightFoot);
+    this.camera.beginFollowToWorldY(neutral.y);
+    this.state = STATE.BODY_FOLLOW;
+    this.autoClimb.phase = "bodyFollow";
+  }
+
+  completeAutoClimbCycle() {
+    const actionType = this.pendingAttempt ? this.pendingAttempt.actionType : "far";
+    this.settlePlayerPose(this.previousHold, actionType);
+    this.switchActiveHandOnce();
+    this.completeCameraFollowImmediately();
+    this.player.animationStage = STATE.READY;
+    if (this.autoClimb.remaining > 0) {
+      this.beginAutoClimbStep();
+      return;
+    }
+    this.finishAutoClimb();
+  }
+
+  finishAutoClimb() {
+    this.autoClimb.active = false;
+    this.autoClimb.phase = null;
+    this.autoClimb.remaining = 0;
+    this.autoClimb.totalDuration = 0;
+    this.autoClimb.flashTime = 0;
+    this.pendingAttempt = null;
+    this.pendingRestHand = null;
+    this.animationResult = null;
+    this.charge = 0;
+    this.chargeDirection = 1;
+    this.poseCharge = 0;
+    this.player.stopIdleRest();
+    this.player.animationStage = STATE.READY;
+    this.state = STATE.READY;
+    this.showToast("\u7206\u53d1\u7ed3\u675f\uff0c\u7ee7\u7eed\u6500\u722c\uff01");
   }
 
   handleFailedGrab(result) {
@@ -4059,8 +4252,11 @@ class Game {
     this.drawRouteHolds(ctx);
     this.drawSupportHolds(ctx, true);
     this.drawRope(ctx);
+    if (this.autoClimb.active) {
+      this.drawAutoClimbSpeedLines(ctx);
+    }
     this.drawPlayer(ctx);
-    if (this.state !== STATE.START) {
+    if (this.state !== STATE.START && !this.autoClimb.active) {
       this.drawTargetHighlight(ctx);
     }
     if (this.state !== STATE.START) {
@@ -4082,6 +4278,9 @@ class Game {
       if (!this.roundEnded && this.state !== STATE.GAME_OVER && this.feedback) {
         this.drawAccuracyFeedback(ctx);
       }
+      if (this.autoClimb.active) {
+        this.drawAutoClimbStatus(ctx);
+      }
     }
     if (this.state !== STATE.GAME_OVER && !this.roundEnded) {
       this.drawPowerUpAura(ctx);
@@ -4101,6 +4300,95 @@ class Game {
     if (DEBUG) {
       this.drawDebug(ctx);
     }
+  }
+
+  drawAutoClimbSpeedLines(ctx) {
+    if (!this.autoClimb.active) {
+      return;
+    }
+    const playerScreen = this.worldToScreen({ x: this.player.worldX, y: this.player.worldY });
+    const time = performance.now() / 1000;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.globalCompositeOperation = "screen";
+    for (let index = 0; index < 14; index += 1) {
+      const progress = (time * 1.9 + index * 0.137) % 1;
+      const lane = Math.sin(index * 4.73) * 142;
+      const drift = Math.sin(time * 4 + index) * 8;
+      const x = clamp(playerScreen.x + lane + drift, 12, CONFIG.logicalWidth - 12);
+      const y = playerScreen.y - 190 + progress * 380;
+      const length = 22 + (index % 4) * 7;
+      const alpha = 0.24 + (index % 3) * 0.1;
+      ctx.strokeStyle = index % 3 === 0
+        ? "rgba(255, 88, 146, " + alpha + ")"
+        : "rgba(74, 214, 239, " + alpha + ")";
+      ctx.lineWidth = 2 + (index % 3) * 0.65;
+      ctx.beginPath();
+      ctx.moveTo(x + 5, y - length);
+      ctx.lineTo(x, y + length);
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    if (this.autoClimb.flashTime > 0) {
+      const flash = this.autoClimb.flashTime / CONFIG.autoClimbFlashDuration;
+      ctx.fillStyle = "rgba(255, 255, 255, " + (0.18 * flash) + ")";
+      ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
+    }
+    ctx.restore();
+  }
+
+  drawAutoClimbStatus(ctx) {
+    if (!this.autoClimb.active) {
+      return;
+    }
+    const w = 190;
+    const h = 52;
+    const x = (CONFIG.logicalWidth - w) / 2;
+    const y = CONFIG.logicalHeight - 184;
+    const remaining = this.autoClimb.remaining;
+    const duration = Math.max(CONFIG.autoClimbDuration, this.autoClimb.totalDuration);
+    const progress = clamp(remaining / duration, 0, 1);
+    const flashProgress = 1 - clamp(
+      this.autoClimb.flashTime / CONFIG.autoClimbFlashDuration,
+      0,
+      1
+    );
+    const scaleAmount = this.autoClimb.flashTime > 0
+      ? 1 + Math.sin(flashProgress * Math.PI) * 0.08
+      : 1;
+
+    ctx.save();
+    ctx.translate(CONFIG.logicalWidth / 2, y + h / 2);
+    ctx.scale(scaleAmount, scaleAmount);
+    ctx.translate(-CONFIG.logicalWidth / 2, -(y + h / 2));
+    ctx.fillStyle = "rgba(28, 68, 103, 0.92)";
+    this.roundRect(ctx, x, y, w, h, 8);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 16px Arial, Helvetica, sans-serif";
+    ctx.fillText("\u7206\u53d1\u6500\u722c", x + 14, y + 21);
+    ctx.fillStyle = "#ff6b9d";
+    ctx.font = "900 19px Arial, Helvetica, sans-serif";
+    ctx.fillText("\u00d72", x + 96, y + 21);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#78e6f4";
+    ctx.font = "900 14px Arial, Helvetica, sans-serif";
+    ctx.fillText(remaining > 0 ? remaining.toFixed(1) + "s" : "\u6700\u540e\u4e00\u6293", x + w - 13, y + 21);
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
+    ctx.fillRect(x + 13, y + 39, w - 26, 5);
+    const bar = ctx.createLinearGradient(x + 13, 0, x + w - 13, 0);
+    bar.addColorStop(0, "#55d8ec");
+    bar.addColorStop(1, "#ff6b9d");
+    ctx.fillStyle = bar;
+    ctx.fillRect(x + 13, y + 39, (w - 26) * progress, 5);
+    ctx.restore();
   }
 
   drawLoadingScreen(ctx) {
