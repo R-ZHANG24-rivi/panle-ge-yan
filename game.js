@@ -105,10 +105,11 @@ const CONFIG = {
     magnet: 5,
     magnifier: 10
   },
-  autoClimbScoreInterval: 1000,
+  autoClimbScoreInterval: 2000,
   autoClimbDuration: 3,
   autoClimbSpeed: 2,
-  autoClimbFlashDuration: 0.55
+  autoClimbFlashDuration: 0.55,
+  maxRockets: 3
 };
 
 const POWER_UPS = {
@@ -119,6 +120,10 @@ const POWER_UPS = {
   magnifier: {
     label: "放大镜",
     color: "#34a9c4"
+  },
+  rocket: {
+    label: "小火箭",
+    color: "#4887DB"
   }
 };
 
@@ -256,7 +261,8 @@ const UI_ICON_FILES = {
   rank: "assets/ui/icon_rank.png",
   soundOn: "assets/ui/icon_sound_on.png",
   soundOff: "assets/ui/icon_sound_off.png",
-  share: "assets/ui/icon_share.png"
+  share: "assets/ui/icon_share.png",
+  rocket: "assets/ui/icon_rocket.png"
 };
 
 const FIGMA_UI_ASSET_FILES = {
@@ -267,6 +273,7 @@ const FIGMA_UI_ASSET_FILES = {
   rankingTitle: "assets/ui/figma/ranking_title.png?v=20260717-figma-title-1",
   magnet: "assets/ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
   magnifier: "assets/ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1",
+  rocket: "assets/ui/icon_rocket.png",
   tutorialHand: "assets/ui/tutorial_hand.png?v=20260717-tutorial-hand"
 };
 const FEEDBACK_ASSET_FILES = {
@@ -2664,8 +2671,15 @@ class Game {
       remaining: 0,
       totalDuration: 0,
       flashTime: 0,
-      milestone: 0
+      milestone: 0,
+      rockets: 0
     };
+    this.rocketButtonRect = null;
+    this.rocketIconRects = [];
+    this.rocketHintActive = false;
+    this.rocketHintEverShown = false;
+    this.rocketHintTimer = 0;
+    this.rocketMaxPrompted = false;
     this.holdCount = 0;
     this.climbHeight = 0;
     this.livesRemaining = CONFIG.maxLives;
@@ -2926,6 +2940,9 @@ class Game {
         this.uiToast = null;
       }
     }
+    if (this.rocketHintTimer > 0) {
+      this.rocketHintTimer = Math.max(0, this.rocketHintTimer - deltaTime);
+    }
     if (this.feedbackTime > 0) {
       this.feedbackTime = Math.max(0, this.feedbackTime - deltaTime);
       if (this.feedbackTime === 0) {
@@ -3119,6 +3136,11 @@ class Game {
       : null;
     if (menuButton) {
       this.activateUiButton(menuButton.id);
+      return true;
+    }
+    // 火箭按钮：游戏进行中右上角
+    if (this.rocketButtonRect && this.pointInRect(point, this.rocketButtonRect)) {
+      this.useRocket();
       return true;
     }
     const button = this.uiButtons.find((item) => this.pointInRect(point, item));
@@ -3545,7 +3567,25 @@ class Game {
       }
     }
     if (grabbedPowerUp) {
-      this.activatePowerUp(grabbedPowerUp);
+      if (grabbedPowerUp === "rocket") {
+        const prevRockets = this.autoClimb.rockets;
+        this.autoClimb.rockets = Math.min(CONFIG.maxRockets, prevRockets + 1);
+        this.audio.playPowerUp();
+        this.showToast("\u83B7\u5F97\u5C0F\u706B\u7BAD \uD83D\uDE80");
+        // 首次收集到小火箭：在左上角火箭图标旁显示一行小字提示
+        if (!this.rocketHintEverShown) {
+          this.rocketHintEverShown = true;
+          this.rocketHintActive = true;
+          this.rocketHintTimer = 5;
+        }
+        // 达到上限时提示使用
+        if (this.autoClimb.rockets >= CONFIG.maxRockets && !this.rocketMaxPrompted) {
+          this.rocketMaxPrompted = true;
+          this.showToast("\u5C0F\u706B\u7BAD\u5DF2\u6EE1\uff0c\u70B9\u51FB\u53D1\u5C04\uff01");
+        }
+      } else {
+        this.activatePowerUp(grabbedPowerUp);
+      }
     }
     const feet = this.chooseFeetSupportsForBody("front", this.player.getNeutralBodyForHold(this.currentHold));
     this.player.beginBodyFollow(this.currentHold, feet.leftFoot, feet.rightFoot);
@@ -3555,7 +3595,8 @@ class Game {
     this.poseCharge = 0;
     this.state = STATE.BODY_FOLLOW;
     if (crossedMilestones > 0 && !this.tutorialActive && !this.roundEnded) {
-      this.beginAutoClimb(crossedMilestones);
+      this.spawnRocketOnUpcomingHolds(crossedMilestones);
+      this.autoClimb.milestone = Math.floor(this.score / CONFIG.autoClimbScoreInterval);
     }
   }
 
@@ -3573,6 +3614,31 @@ class Game {
     if (!this.autoClimb.phase) {
       this.beginAutoClimbStep();
     }
+  }
+
+  spawnRocketOnUpcomingHolds(count) {
+    let spawned = 0;
+    for (let i = this.currentIndex + 2; i < this.routeHolds.length && spawned < count; i += 1) {
+      const hold = this.routeHolds[i];
+      if (!hold.powerUp && hold.type === "route" && !hold.hidden) {
+        hold.powerUp = "rocket";
+        spawned += 1;
+      }
+    }
+    if (spawned > 0) {
+      this.autoClimb.milestone = Math.floor(this.score / CONFIG.autoClimbScoreInterval);
+    }
+  }
+
+  useRocket() {
+    if (this.autoClimb.rockets <= 0 || this.autoClimb.active) return;
+    this.autoClimb.rockets -= 1;
+    this.rocketHintActive = false;
+    if (this.autoClimb.rockets < CONFIG.maxRockets) {
+      this.rocketMaxPrompted = false;
+    }
+    this.beginAutoClimb(1);
+    this.showToast("\uD83D\uDE80 \u53D1\u5C04\uFF01");
   }
 
   updateAutoClimb(deltaTime) {
@@ -4361,33 +4427,111 @@ class Game {
     ctx.translate(CONFIG.logicalWidth / 2, y + h / 2);
     ctx.scale(scaleAmount, scaleAmount);
     ctx.translate(-CONFIG.logicalWidth / 2, -(y + h / 2));
-    ctx.fillStyle = "rgba(28, 68, 103, 0.92)";
-    this.roundRect(ctx, x, y, w, h, 8);
+    // 白底药丸（对齐吸铁石/放大镜样式）
+    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+    this.roundRect(ctx, x, y, w, h, h / 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
 
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = "#ff5f8c";
     ctx.font = "900 16px Arial, Helvetica, sans-serif";
-    ctx.fillText("\u7206\u53d1\u6500\u722c", x + 14, y + 21);
-    ctx.fillStyle = "#ff6b9d";
-    ctx.font = "900 19px Arial, Helvetica, sans-serif";
-    ctx.fillText("\u00d72", x + 96, y + 21);
+    ctx.fillText("\u7206\u53d1\u6500\u722c", x + 14, y + h / 2);
+    ctx.fillStyle = "#ff5f8c";
+    ctx.font = "900 18px Arial, Helvetica, sans-serif";
+    ctx.fillText("\u00d72", x + 96, y + h / 2);
     ctx.textAlign = "right";
-    ctx.fillStyle = "#78e6f4";
-    ctx.font = "900 14px Arial, Helvetica, sans-serif";
-    ctx.fillText(remaining > 0 ? remaining.toFixed(1) + "s" : "\u6700\u540e\u4e00\u6293", x + w - 13, y + 21);
+    ctx.fillStyle = "#4bb8d6";
+    ctx.font = "900 15px Arial, Helvetica, sans-serif";
+    ctx.fillText(remaining > 0 ? remaining.toFixed(1) + "s" : "\u6700\u540e\u4e00\u6293", x + w - 14, y + h / 2);
 
-    ctx.fillStyle = "rgba(255, 255, 255, 0.22)";
-    ctx.fillRect(x + 13, y + 39, w - 26, 5);
+    ctx.fillStyle = "rgba(255, 95, 140, 0.22)";
+    ctx.fillRect(x + 13, y + h - 7, w - 26, 4);
     const bar = ctx.createLinearGradient(x + 13, 0, x + w - 13, 0);
     bar.addColorStop(0, "#55d8ec");
     bar.addColorStop(1, "#ff6b9d");
     ctx.fillStyle = bar;
-    ctx.fillRect(x + 13, y + 39, (w - 26) * progress, 5);
+    ctx.fillRect(x + 13, y + h - 7, (w - 26) * progress, 4);
+    ctx.restore();
+  }
+
+  drawRocketButton(ctx) {
+    if (this.state === STATE.START || this.state === STATE.LOADING || this.roundEnded || this.tutorialActive || this.autoClimb.active) {
+      this.rocketButtonRect = null;
+      this.rocketIconRects = [];
+      return;
+    }
+    const rockets = this.autoClimb.rockets;
+    if (rockets <= 0) {
+      this.rocketButtonRect = null;
+      this.rocketIconRects = [];
+      return;
+    }
+
+    ctx.save();
+
+    // 图标排列：参考截图4，在HUD信息下方（当前高度行下方），左侧对齐
+    const iconSize = 36;
+    const gap = 6;
+    const baseX = CONFIG.safeSide + 3;
+    const baseY = CONFIG.safeTop + 108;
+
+    this.rocketIconRects = [];
+
+    for (let i = 0; i < rockets; i += 1) {
+      const ix = baseX + i * (iconSize + gap);
+      const iy = baseY;
+      const rect = { id: "rocket", index: i, x: ix, y: iy, w: iconSize, h: iconSize };
+      this.rocketIconRects.push(rect);
+
+      // 火箭图标
+      const asset = this.uiIconAssets["rocket"];
+      if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+        ctx.drawImage(asset.image, ix, iy, iconSize, iconSize);
+      } else {
+        // fallback
+        ctx.fillStyle = "#ffd93d";
+        ctx.font = "bold 24px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("\uD83D\uDE80", ix + iconSize / 2, iy + iconSize / 2);
+      }
+    }
+
+    // 首次收集火箭提示：图标下方一行小字（5秒渐隐）
+    if (this.rocketHintActive && this.rocketHintTimer > 0) {
+      const hintText = "点击小火箭开启3秒爆发无敌时间";
+      ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+      const hpad = 11;
+      const hw = ctx.measureText(hintText).width + hpad * 2;
+      const hh = 26;
+      const hx = baseX;
+      const hy = baseY + iconSize + 9;
+
+      // 最后1秒渐隐
+      const hintAlpha = this.rocketHintTimer <= 1 ? clamp(this.rocketHintTimer, 0, 1) : 1;
+      ctx.globalAlpha = hintAlpha;
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+      this.roundRect(ctx, hx, hy, hw, hh, hh / 2);
+      ctx.fill();
+      ctx.fillStyle = "#315f72";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(hintText, hx + hpad, hy + hh / 2 + 0.5);
+
+      ctx.globalAlpha = 1;
+    }
+
+    // 整体点击区域（兼容）
+    this.rocketButtonRect = {
+      id: "rocket",
+      x: baseX,
+      y: baseY,
+      w: rockets * iconSize + (rockets - 1) * gap,
+      h: iconSize
+    };
+
     ctx.restore();
   }
 
@@ -4873,7 +5017,8 @@ class Game {
     const y = screen.y - this.getHoldVisualRadius(hold) - 18;
     const asset = this.figmaUiAssets && this.figmaUiAssets[type];
     if (asset && asset.loaded && !asset.failed && asset.image.complete) {
-      const size = 34;
+      const baseSize = 34;
+      const size = type === "rocket" ? Math.round(baseSize * 1.25) : baseSize;
       ctx.save();
       ctx.shadowColor = "rgba(46, 108, 128, 0.24)";
       ctx.shadowBlur = 8;
@@ -6069,6 +6214,9 @@ class Game {
     if (this.state === STATE.CHARGING) {
       this.drawChargeBar(ctx);
     }
+
+    // 火箭图标：右上角，点击使用爆发攀爬
+    this.drawRocketButton(ctx);
   }
 
   drawLives(ctx, x, y) {
@@ -6532,6 +6680,11 @@ class Game {
       ctx.font = "900 24px Arial, Helvetica, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = "#ffffff";
+      ctx.strokeText("?", cx, cy + 1);
       ctx.fillText("?", cx, cy + 1);
     } else if (id === "sound") {
       if (this.soundMuted) {
@@ -7304,16 +7457,17 @@ class Game {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "bold 14px Arial, Helvetica, sans-serif";
+    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
     const paddingX = 18;
     const w = ctx.measureText(this.uiToast).width + paddingX * 2;
-    const h = 36;
+    const h = 34;
     const x = (CONFIG.logicalWidth - w) / 2;
     const y = CONFIG.logicalHeight - 220;
-    ctx.fillStyle = "rgba(49, 95, 114, 0.84)";
-    this.roundRect(ctx, x, y, w, h, 18);
+    // 白底药丸（对齐吸铁石/放大镜样式）
+    ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+    this.roundRect(ctx, x, y, w, h, h / 2);
     ctx.fill();
-    ctx.fillStyle = "white";
+    ctx.fillStyle = "#ff5f8c";
     ctx.fillText(this.uiToast, CONFIG.logicalWidth / 2, y + h / 2);
     ctx.restore();
   }
@@ -7511,8 +7665,8 @@ class Game {
     ctx.lineTo(x + w - 28, y + 130);
     ctx.stroke();
 
-    const itemCenters = [x + w * 0.27, x + w * 0.73];
-    const itemTypes = ["magnifier", "magnet"];
+    const itemCenters = [x + w * 0.2, x + w * 0.5, x + w * 0.8];
+    const itemTypes = ["magnifier", "magnet", "rocket"];
     for (let index = 0; index < itemTypes.length; index += 1) {
       const type = itemTypes[index];
       const centerX = itemCenters[index];
@@ -7523,7 +7677,10 @@ class Game {
       ctx.fillText(POWER_UPS[type].label, centerX, y + 192);
       ctx.fillStyle = "#657a82";
       ctx.font = "bold 12px Arial, Helvetica, sans-serif";
-      ctx.fillText(type === "magnifier" ? "判定范围扩大 10 秒" : "自动吸附岩点 5 秒", centerX, y + 214);
+      const desc = type === "magnifier" ? "判定范围扩大 10 秒"
+        : type === "magnet" ? "自动吸附5秒"
+        : "3秒爆发无敌";
+      ctx.fillText(desc, centerX, y + 214);
     }
     ctx.restore();
   }
