@@ -5,6 +5,11 @@
   user-select: none;
 }
 
+:root {
+  --canvas-css-width: min(100vw, calc(var(--app-height, 100dvh) * 375 / 812));
+  --canvas-css-height: calc(var(--canvas-css-width) * 812 / 375);
+}
+
 html,
 body {
   width: 100%;
@@ -23,7 +28,6 @@ body {
 }
 
 .game-shell {
-  --canvas-width: min(100vw, calc(var(--app-height, 100dvh) * 375 / 812));
   width: 100vw;
   width: 100dvw;
   height: 100vh;
@@ -47,8 +51,8 @@ body {
 
 #gameCanvas {
   display: block;
-  width: var(--canvas-width);
-  height: calc(var(--canvas-width) * 812 / 375);
+  width: var(--canvas-css-width);
+  height: var(--canvas-css-height);
   max-width: none;
   max-height: var(--app-height, 100dvh);
   background: #eaf8fc;

@@ -21,6 +21,7 @@ const CONFIG = {
   safeBottom: 60,
   safeSide: 20,
   topControlsY: 28,
+  displayScale: 1,
   playerBodyOffsetY: 96,
   chargePlayerBodyOffsetY: 66,
   cameraPlayerScreenY: 545,
@@ -111,6 +112,46 @@ const CONFIG = {
   autoClimbFlashDuration: 0.55,
   maxRockets: 3
 };
+
+const QUWAN_PLATFORM = window.QuwanPlatform || null;
+if (QUWAN_PLATFORM) {
+  CONFIG.safeTop = QUWAN_PLATFORM.getTopSafeInset();
+  CONFIG.topControlsY = QUWAN_PLATFORM.usesCustomTitleBar() ? 60 : 28;
+}
+
+const SOUND_MUTED_STORAGE_KEY = "panleGeYanSoundMuted";
+
+function reportQuwanEvent(eventName, businessParams = {}) {
+  if (QUWAN_PLATFORM && typeof QUWAN_PLATFORM.reportEvent === "function") {
+    QUWAN_PLATFORM.reportEvent(eventName, businessParams);
+  }
+}
+
+function setCanvasFont(ctx, font) {
+  const value = String(font || "");
+  const match = value.match(/(\d+(?:\.\d+)?)px/);
+  if (!match) {
+    ctx.font = value;
+    return;
+  }
+  const displayScale = Math.max(0.1, Number(CONFIG.displayScale) || 1);
+  const requestedSize = Number(match[1]) || 12;
+  const minimumLogicalSize = 12 / Math.min(1, displayScale);
+  const adjustedSize = Math.max(requestedSize, minimumLogicalSize);
+  const normalizedSize = Number(adjustedSize.toFixed(2));
+  ctx.font = value.replace(match[0], `${normalizedSize}px`);
+}
+
+function getTopControlMetrics() {
+  const displayScale = Math.max(0.1, Number(CONFIG.displayScale) || 1);
+  const compactScale = Math.min(1, displayScale);
+  return {
+    displayScale,
+    size: Math.min(56, Math.max(40, 40 / compactScale)),
+    gap: Math.min(12, Math.max(9, 8 / compactScale)),
+    y: Math.min(84, CONFIG.topControlsY / compactScale)
+  };
+}
 
 const POWER_UPS = {
   magnet: {
@@ -302,7 +343,7 @@ const FEEDBACK_ASSET_FILES = {
 };
 
 const AUDIO_FILES = {
-  bgm: "assets/audio/bgm_main.mp3?v=20260717-new-bgm",
+  bgm: "assets/audio/bgm_main.mp3?v=20260717-under-100kb",
   grabSuccess: "assets/audio/sfx_grab_success.mp3?v=20260716-optimized-1",
   charge: "assets/audio/sfx_charge.mp3?v=20260716-optimized-1",
   powerUp: "assets/audio/sfx_power_up.mp3?v=20260716-optimized-1",
@@ -815,44 +856,132 @@ class Camera {
   }
 }
 
+function loadLocalAsset(url, responseType = "text") {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, true);
+    request.responseType = responseType;
+    request.onload = () => {
+      if (request.status === 0 || (request.status >= 200 && request.status < 300)) {
+        resolve(request.response);
+      } else {
+        reject(new Error(`Asset load failed: ${request.status}`));
+      }
+    };
+    request.onerror = () => reject(new Error("Local asset load failed"));
+    request.send();
+  });
+}
+
+async function loadTextAsset(url) {
+  if (window.location.protocol === "file:") {
+    return loadLocalAsset(url, "text");
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Asset load failed: ${response.status}`);
+  return response.text();
+}
+
+async function loadArrayBufferAsset(url) {
+  if (window.location.protocol === "file:") {
+    return loadLocalAsset(url, "arraybuffer");
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Audio load failed: ${response.status}`);
+  return response.arrayBuffer();
+}
+
 class HoldAssetManager {
   constructor(themeSets) {
     this.themeSets = Array.isArray(themeSets) ? themeSets : [];
     this.themeAssets = new Map();
     this.themeAssetsById = new Map();
+    this.loadingThemes = new Map();
     this.currentThemeId = null;
     this.assets = [];
     this.assetsById = new Map();
     this.ready = false;
     this.failed = false;
-    this.readyPromise = this.loadThemes();
+    this.readyPromise = this.loadInitialTheme();
   }
 
-  async loadThemes() {
+  pickInitialTheme() {
+    const forcedTheme = this.getForcedThemeId();
+    if (forcedTheme) {
+      const forced = this.themeSets.find((theme) => theme.id === forcedTheme);
+      if (forced) return forced;
+    }
+    return this.themeSets[Math.floor(Math.random() * this.themeSets.length)] || null;
+  }
+
+  registerTheme(theme) {
+    if (!theme || !theme.assets || theme.assets.length === 0) return false;
+    this.themeAssets.set(theme.id, theme.assets);
+    this.themeAssetsById.set(theme.id, new Map(theme.assets.map((asset) => [asset.id, asset])));
+    return true;
+  }
+
+  getNextThemeSet() {
+    if (this.themeSets.length === 0) return null;
+    const currentIndex = this.themeSets.findIndex((theme) => theme.id === this.currentThemeId);
+    const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % this.themeSets.length : 0;
+    return this.themeSets[nextIndex];
+  }
+
+  ensureThemeLoaded(theme) {
+    if (!theme) return Promise.resolve(null);
+    if (this.themeAssets.has(theme.id)) {
+      return Promise.resolve({ id: theme.id, assets: this.themeAssets.get(theme.id) });
+    }
+    if (this.loadingThemes.has(theme.id)) {
+      return this.loadingThemes.get(theme.id);
+    }
+    const task = this.loadTheme(theme)
+      .then((loadedTheme) => {
+        this.registerTheme(loadedTheme);
+        reportQuwanEvent("theme_lazy_loaded", { theme_id: loadedTheme.id });
+        return loadedTheme;
+      })
+      .catch((error) => {
+        console.warn("Lazy theme load failed", theme.id, error);
+        return null;
+      })
+      .finally(() => this.loadingThemes.delete(theme.id));
+    this.loadingThemes.set(theme.id, task);
+    return task;
+  }
+
+  async loadInitialTheme() {
     try {
-      const loadedThemes = await Promise.all(this.themeSets.map((theme) => this.loadTheme(theme)));
-      const validThemes = loadedThemes.filter((theme) => theme && theme.assets.length > 0);
-      for (const theme of validThemes) {
-        this.themeAssets.set(theme.id, theme.assets);
-        this.themeAssetsById.set(theme.id, new Map(theme.assets.map((asset) => [asset.id, asset])));
-      }
-      this.ready = validThemes.length > 0;
+      const initialTheme = this.pickInitialTheme();
+      if (!initialTheme) throw new Error("No hold theme configured");
+      const loadedTheme = await this.loadTheme(initialTheme);
+      this.ready = this.registerTheme(loadedTheme);
       this.failed = !this.ready;
       if (this.ready) {
-        const forcedTheme = this.getForcedThemeId();
-        if (forcedTheme && this.themeAssets.has(forcedTheme)) {
-          this.useTheme(forcedTheme);
-        } else {
-          this.selectRandomTheme(false);
-        }
+        this.useTheme(loadedTheme.id);
+        reportQuwanEvent("theme_initial_loaded", { theme_id: loadedTheme.id });
       }
       return this.ready;
     } catch (error) {
-      console.warn("Theme hold assets unavailable", error);
+      console.warn("Initial theme assets unavailable", error);
       this.ready = false;
       this.failed = true;
       return false;
     }
+  }
+
+  preloadNextTheme() {
+    return this.ensureThemeLoaded(this.getNextThemeSet());
+  }
+
+  async switchToNextTheme() {
+    const nextTheme = this.getNextThemeSet();
+    const loadedTheme = await this.ensureThemeLoaded(nextTheme);
+    if (!loadedTheme || !this.useTheme(loadedTheme.id)) return this.currentThemeId;
+    reportQuwanEvent("theme_switched", { theme_id: loadedTheme.id });
+    void this.preloadNextTheme();
+    return this.currentThemeId;
   }
 
   getForcedThemeId() {
@@ -865,11 +994,8 @@ class HoldAssetManager {
     }
   }
   async loadTheme(theme) {
-    const response = await fetch(theme.manifestFile);
-    if (!response.ok) {
-      throw new Error(`Failed to load hold manifest: ${response.status}`);
-    }
-    const manifest = await response.json();
+    const manifestText = await loadTextAsset(theme.manifestFile);
+    const manifest = JSON.parse(manifestText);
     const themeId = manifest.themeId || theme.id;
     const themeInfo = { ...theme, id: themeId };
     const loadedAssets = await Promise.all((manifest.holds || []).map((entry, index) => this.loadHoldAsset(themeInfo, entry, index)));
@@ -890,8 +1016,7 @@ class HoldAssetManager {
     let gripFromSvg = null;
     if (entry.grip) {
       try {
-        const gripResponse = await fetch(`${theme.basePath}/${entry.grip}`);
-        const gripText = gripResponse.ok ? await gripResponse.text() : "";
+        const gripText = await loadTextAsset(`${theme.basePath}/${entry.grip}`);
         gripFromSvg = parseGripSvg(gripText, nativeSize);
       } catch (error) {
         gripFromSvg = null;
@@ -939,8 +1064,7 @@ class HoldAssetManager {
 
     let outlineText = "";
     try {
-      const outlineResponse = await fetch(`${theme.basePath}/${entry.outline}`);
-      outlineText = outlineResponse.ok ? await outlineResponse.text() : "";
+      outlineText = await loadTextAsset(`${theme.basePath}/${entry.outline}`);
     } catch (error) {
       outlineText = "";
     }
@@ -971,6 +1095,7 @@ class HoldAssetManager {
     }
     const nextThemeId = candidates[Math.floor(Math.random() * candidates.length)] || themeIds[0];
     this.useTheme(nextThemeId);
+    this.preloadNextTheme();
     return this.currentThemeId;
   }
 
@@ -2001,6 +2126,7 @@ class InputController {
     this.game = game;
     this.activePointerId = null;
     this.isPointerDown = false;
+    this.uiDragActive = false;
     this.bindEvents();
   }
 
@@ -2020,6 +2146,7 @@ class InputController {
     this.inputTarget.addEventListener("touchmove", blockNativeTouch, { passive: false });
     this.inputTarget.addEventListener("touchend", blockNativeTouch, { passive: false });
     this.inputTarget.addEventListener("pointerdown", (event) => this.onPointerDown(event));
+    this.inputTarget.addEventListener("pointermove", (event) => this.onPointerMove(event));
     this.inputTarget.addEventListener("pointerup", (event) => this.onPointerUp(event));
     this.inputTarget.addEventListener("pointercancel", (event) => this.onPointerCancel(event));
     this.inputTarget.addEventListener("lostpointercapture", (event) => this.onPointerCancel(event));
@@ -2032,6 +2159,15 @@ class InputController {
       return;
     }
     const point = this.getLogicalPoint(event);
+    if (this.game.beginUiDrag(point)) {
+      this.activePointerId = event.pointerId;
+      this.isPointerDown = true;
+      this.uiDragActive = true;
+      if (this.inputTarget.setPointerCapture) {
+        this.inputTarget.setPointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (this.game.handleUiPointer(point)) {
       return;
     }
@@ -2043,9 +2179,23 @@ class InputController {
     this.game.handlePressStart();
   }
 
+  onPointerMove(event) {
+    if (event.pointerId !== this.activePointerId || !this.uiDragActive) {
+      return;
+    }
+    event.preventDefault();
+    this.game.updateUiDrag(this.getLogicalPoint(event));
+  }
+
   onPointerUp(event) {
     event.preventDefault();
     if (event.pointerId !== this.activePointerId) {
+      return;
+    }
+    if (this.uiDragActive) {
+      this.game.endUiDrag(this.getLogicalPoint(event));
+      this.uiDragActive = false;
+      this.releasePointer(event.pointerId);
       return;
     }
     this.releasePointer(event.pointerId);
@@ -2056,6 +2206,12 @@ class InputController {
     if (event.pointerId !== this.activePointerId) {
       return;
     }
+    if (this.uiDragActive) {
+      this.game.endUiDrag(null);
+      this.uiDragActive = false;
+      this.releasePointer(event.pointerId);
+      return;
+    }
     this.releasePointer(event.pointerId);
     this.game.handlePressCancel();
   }
@@ -2064,17 +2220,22 @@ class InputController {
     if (this.activePointerId === null) {
       return;
     }
+    if (this.uiDragActive) {
+      this.game.endUiDrag(null);
+      this.uiDragActive = false;
+      this.releasePointer(this.activePointerId);
+      return;
+    }
     this.activePointerId = null;
     this.isPointerDown = false;
     this.game.handlePressCancel();
   }
 
   releasePointer(pointerId) {
-    if (this.inputTarget.hasPointerCapture && this.inputTarget.hasPointerCapture(pointerId)) {
-      this.inputTarget.releasePointerCapture(pointerId);
-    }
+    const hasCapture = this.inputTarget.hasPointerCapture && this.inputTarget.hasPointerCapture(pointerId);
     this.activePointerId = null;
     this.isPointerDown = false;
+    if (hasCapture) this.inputTarget.releasePointerCapture(pointerId);
   }
 }
 
@@ -2083,6 +2244,7 @@ class AudioManager {
     this.files = files;
     this.enabled = true;
     this.unlocked = false;
+    this.backgroundPaused = false;
     this.context = null;
     this.buffers = new Map();
     this.reverseBuffers = new Map();
@@ -2174,13 +2336,7 @@ class AudioManager {
       this.failedSfx.add(name);
       return Promise.resolve(false);
     }
-    const loadPromise = fetch(src)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Audio load failed: ${response.status}`);
-        }
-        return response.arrayBuffer();
-      })
+    const loadPromise = loadArrayBufferAsset(src)
       .then((arrayBuffer) => context.decodeAudioData(arrayBuffer))
       .then((buffer) => {
         this.buffers.set(name, buffer);
@@ -2227,13 +2383,24 @@ class AudioManager {
   }
 
   playBgm() {
-    if (!this.enabled || !this.unlocked) {
+    if (!this.enabled || !this.unlocked || this.backgroundPaused) {
       return;
     }
     const playPromise = this.bgm.play();
     if (playPromise && typeof playPromise.catch === "function") {
       playPromise.catch(() => {});
     }
+  }
+
+  pauseForBackground() {
+    this.backgroundPaused = true;
+    this.stopCharge();
+    this.bgm.pause();
+  }
+
+  resumeFromBackground() {
+    this.backgroundPaused = false;
+    this.playBgm();
   }
 
   playSfx(name, options = {}) {
@@ -2434,13 +2601,32 @@ class Game {
     this.audio = new AudioManager(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
+    this.soundMuted = this.loadSoundMutedPreference();
+    this.audio.enabled = !this.soundMuted;
+    this.audio.bgm.muted = this.soundMuted;
     this.selectedOutfitPart = "hair";
     this.uiButtons = [];
     this.menuButtons = [];
     this.uiPanel = null;
     this.uiToast = null;
     this.uiToastTime = 0;
-    this.soundMuted = false;
+    this.remoteLeaderboard = {
+      status: "idle",
+      entries: [],
+      own: null,
+      error: ""
+    };
+    this.loggedInUser = QUWAN_PLATFORM && typeof QUWAN_PLATFORM.getCurrentUser === "function"
+      ? QUWAN_PLATFORM.getCurrentUser()
+      : null;
+    this.remoteAvatarAssets = new Map();
+    this.guestRankingMode = false;
+    this.leaderboardScrollOffset = 0;
+    this.leaderboardMaxScroll = 0;
+    this.leaderboardScrollRect = null;
+    this.leaderboardDrag = null;
+    this.themeSwitchPending = false;
+    this.backgroundPaused = Boolean(document.hidden);
     this.loading = true;
     this.loadingProgress = 0;
     this.loadingLoaded = 0;
@@ -2450,6 +2636,7 @@ class Game {
     this.resetGame();
     this.state = STATE.LOADING;
     this.setupResize();
+    this.setupLifecycle();
     this.preloadGameAssets();
     requestAnimationFrame((time) => this.loop(time));
   }
@@ -2542,6 +2729,67 @@ class Game {
     }
   }
 
+  loadSoundMutedPreference() {
+    try {
+      return window.localStorage.getItem(SOUND_MUTED_STORAGE_KEY) === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  saveSoundMutedPreference() {
+    try {
+      window.localStorage.setItem(SOUND_MUTED_STORAGE_KEY, this.soundMuted ? "1" : "0");
+    } catch (error) {
+      // Storage may be disabled; keep the current session state.
+    }
+  }
+
+  loadTutorialDismissedPreference() {
+    if (this.tutorialCompletedThisSession) return true;
+    try {
+      return window.localStorage.getItem("climbGame_tutorial_completed") === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  saveTutorialDismissedPreference() {
+    this.tutorialCompletedThisSession = true;
+    try {
+      window.localStorage.setItem("climbGame_tutorial_completed", "1");
+    } catch (error) {
+      // Storage may be disabled; the tutorial still completes for this session.
+    }
+  }
+
+  setupLifecycle() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        this.backgroundPaused = true;
+        this.input.cancelActiveInput();
+        this.audio.pauseForBackground();
+        reportQuwanEvent("page_hidden", { state: this.state });
+      } else {
+        this.backgroundPaused = false;
+        this.lastTime = performance.now();
+        this.audio.resumeFromBackground();
+        reportQuwanEvent("page_visible", { state: this.state });
+      }
+    });
+    window.addEventListener("pagehide", () => {
+      this.backgroundPaused = true;
+      this.audio.pauseForBackground();
+    });
+    window.addEventListener("pageshow", () => {
+      if (!document.hidden) {
+        this.backgroundPaused = false;
+        this.lastTime = performance.now();
+        this.audio.resumeFromBackground();
+      }
+    });
+  }
+
   isValidOutfitOption(part, optionId) {
     return Boolean(OUTFIT_OPTIONS[part] && OUTFIT_OPTIONS[part].some((option) => option.id === optionId));
   }
@@ -2586,12 +2834,21 @@ class Game {
   }
 
   resizeCanvas() {
+    const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
     const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    const displayScale = Math.max(0.1, Math.min(
+      viewportWidth / CONFIG.logicalWidth,
+      viewportHeight / CONFIG.logicalHeight
+    ));
+    CONFIG.displayScale = displayScale;
+    const cssWidth = CONFIG.logicalWidth * displayScale;
+    const cssHeight = CONFIG.logicalHeight * displayScale;
     document.documentElement.style.setProperty("--app-height", `${viewportHeight}px`);
-    const rect = this.canvas.getBoundingClientRect();
+    document.documentElement.style.setProperty("--canvas-css-width", `${cssWidth}px`);
+    document.documentElement.style.setProperty("--canvas-css-height", `${cssHeight}px`);
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-    this.canvas.width = Math.round(rect.width * dpr);
-    this.canvas.height = Math.round(rect.height * dpr);
+    this.canvas.width = Math.round(cssWidth * dpr);
+    this.canvas.height = Math.round(cssHeight * dpr);
     this.ctx.setTransform(
       this.canvas.width / CONFIG.logicalWidth,
       0,
@@ -2650,9 +2907,6 @@ class Game {
 
   resetGame(options = {}) {
     this.state = STATE.RESTARTING;
-    if (options.switchTheme) {
-      this.holdAssets.selectRandomTheme(true);
-    }
     this.charge = 0;
     this.chargeDirection = 1;
     this.poseCharge = 0;
@@ -2684,7 +2938,9 @@ class Game {
     this.climbHeight = 0;
     this.livesRemaining = CONFIG.maxLives;
     this.recoveringFromMiss = false;
-    const tutorialEnabled = options.tutorialEnabled ?? !localStorage.getItem("climbGame_tutorial_completed");
+    this.pendingRocketGameOver = false;
+    this.pendingRocketFallResult = null;
+    const tutorialEnabled = options.tutorialEnabled ?? !this.loadTutorialDismissedPreference();
     this.tutorialActive = tutorialEnabled;
     this.tutorialDismissed = !tutorialEnabled;
     this.tutorialPhase = "hold";
@@ -2695,6 +2951,7 @@ class Game {
     this.tutorialCompletionShown = false;
     this.tutorialCompleteTime = 0;
     this.tutorialCompleteDuration = 3;
+    this.tutorialCompleteCloseRect = null;
     this.roundElapsed = 0;
     this.finalRoundDuration = 0;
     this.gameOverStage = "summary";
@@ -2740,6 +2997,19 @@ class Game {
 
   startGame() {
     this.resetGame();
+    this.holdAssets.preloadNextTheme();
+    reportQuwanEvent("game_start", { theme_id: this.holdAssets.currentThemeId || "" });
+  }
+
+  async restartWithNextTheme() {
+    if (this.themeSwitchPending) return;
+    this.themeSwitchPending = true;
+    try {
+      await this.holdAssets.switchToNextTheme();
+      this.resetGame();
+    } finally {
+      this.themeSwitchPending = false;
+    }
   }
 
   prepareStartDemoClimb() {
@@ -2926,10 +3196,12 @@ class Game {
     }
   }
   loop(time) {
-    const deltaTime = Math.min((time - this.lastTime) / 1000, 0.05);
-    this.lastTime = time;
-    this.update(deltaTime);
-    this.draw();
+    if (!this.backgroundPaused) {
+      const deltaTime = Math.min((time - this.lastTime) / 1000, 0.05);
+      this.lastTime = time;
+      this.update(deltaTime);
+      this.draw();
+    }
     requestAnimationFrame((nextTime) => this.loop(nextTime));
   }
 
@@ -3079,7 +3351,6 @@ class Game {
     }
     this.audio.unlock();
     if (this.tutorialCompleteTime > 0) {
-      this.dismissTutorialComplete();
       return;
     }
     if (this.state === STATE.START) {
@@ -3091,6 +3362,8 @@ class Game {
     if (this.state === STATE.GAME_OVER || this.roundEnded) {
       if (this.gameOverStage === "summary") {
         this.gameOverStage = "ranking";
+        this.resetLeaderboardScroll();
+        void this.loadRemoteLeaderboard(true);
       }
       this.state = STATE.GAME_OVER;
       return;
@@ -3105,13 +3378,51 @@ class Game {
     this.beginCharge();
   }
 
+  resetLeaderboardScroll() {
+    this.leaderboardScrollOffset = 0;
+    this.leaderboardMaxScroll = 0;
+    this.leaderboardDrag = null;
+  }
+
+  beginUiDrag(point) {
+    const rankingVisible = Boolean(
+      this.uiPanel && this.uiPanel.type === "rank"
+      || this.state === STATE.GAME_OVER && this.gameOverStage === "ranking"
+    );
+    if (!rankingVisible) return false;
+    if (!this.leaderboardScrollRect || this.leaderboardMaxScroll <= 0) return false;
+    if (!this.pointInRect(point, this.leaderboardScrollRect, false)) return false;
+    this.leaderboardDrag = {
+      startY: point.y,
+      startOffset: this.leaderboardScrollOffset
+    };
+    return true;
+  }
+
+  updateUiDrag(point) {
+    if (!this.leaderboardDrag || !point) return;
+    const deltaY = this.leaderboardDrag.startY - point.y;
+    this.leaderboardScrollOffset = clamp(
+      this.leaderboardDrag.startOffset + deltaY,
+      0,
+      this.leaderboardMaxScroll
+    );
+  }
+
+  endUiDrag() {
+    this.leaderboardDrag = null;
+  }
+
   handleUiPointer(point) {
     if (this.loading || this.state === STATE.LOADING) {
       return true;
     }
     this.audio.unlock();
     if (this.tutorialCompleteTime > 0) {
-      this.dismissTutorialComplete();
+      if (this.tutorialCompleteCloseRect && this.pointInRect(point, this.tutorialCompleteCloseRect)) {
+        reportQuwanEvent("tutorial_complete_close", { source: "close_button" });
+        this.dismissTutorialComplete();
+      }
       return true;
     }
     if (this.uiPanel) {
@@ -3151,13 +3462,21 @@ class Game {
     return true;
   }
 
-  pointInRect(point, rect) {
-    return point.x >= rect.x && point.x <= rect.x + rect.w && point.y >= rect.y && point.y <= rect.y + rect.h;
+  pointInRect(point, rect, expandHitArea = true) {
+    const displayScale = Math.max(0.1, Number(CONFIG.displayScale) || 1);
+    const minimumLogicalHitSize = expandHitArea ? 40 / Math.min(1, displayScale) : 0;
+    const extraX = expandHitArea ? Math.max(0, (minimumLogicalHitSize - rect.w) / 2) : 0;
+    const extraY = expandHitArea ? Math.max(0, (minimumLogicalHitSize - rect.h) / 2) : 0;
+    return point.x >= rect.x - extraX
+      && point.x <= rect.x + rect.w + extraX
+      && point.y >= rect.y - extraY
+      && point.y <= rect.y + rect.h + extraY;
   }
 
   activateUiButton(id) {
+    reportQuwanEvent("ui_click", { button_id: `panlegeyan_${id}_btn`, state: this.state });
     if (id === "play") {
-      this.startGame();
+      void this.requestStartGame();
       return;
     }
     if (id === "tutorial") {
@@ -3165,8 +3484,7 @@ class Game {
       return;
     }
     if (id === "restart") {
-      this.resetGame({ switchTheme: true });
-      this.showToast("已重新开始");
+      void this.restartWithNextTheme();
       return;
     }
     if (id === "start") {
@@ -3175,24 +3493,31 @@ class Game {
       return;
     }
     if (id === "back") {
-      this.showToast("已在开始界面");
+      if (QUWAN_PLATFORM) {
+        void QUWAN_PLATFORM.closePage().then((closed) => {
+          if (!closed) this.showToast("请使用浏览器返回按钮退出");
+        });
+      }
       return;
     }
     if (id === "rank") {
+      this.resetLeaderboardScroll();
       this.uiPanel = { type: "rank" };
+      void this.openRankingWithLogin();
       return;
     }
     if (id === "gameover-restart") {
-      this.resetGame({ switchTheme: true });
+      void this.restartWithNextTheme();
       return;
     }
     if (id === "gameover-close") {
-      this.resetGame({ switchTheme: true });
+      void this.restartWithNextTheme();
       return;
     }
     if (id === "sound") {
       this.soundMuted = !this.soundMuted;
       this.audio.setMuted(this.soundMuted);
+      this.saveSoundMutedPreference();
       this.showToast(this.soundMuted ? "声音已关闭" : "声音已开启");
       return;
     }
@@ -3241,22 +3566,32 @@ class Game {
     this.uiToastTime = 1.6;
   }
 
-  shareGame() {
-    const text = `我在趣玩攀岩小游戏爬到了 ${formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter)}，最高岩点 ${this.scoreManager.best.holds} 个，最高分 ${this.scoreManager.best.score || 0}。`;
-    const url = window.location.href;
+  async shareGame() {
+    const content = `我在《攀了个岩》爬到了 ${formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter)}，最高分 ${this.scoreManager.best.score || 0}。`;
+    if (QUWAN_PLATFORM && QUWAN_PLATFORM.isQQNews()) {
+      const result = await QUWAN_PLATFORM.showShareMenu({ content });
+      this.showToast(result.success ? "分享面板已打开" : "分享暂不可用");
+      return;
+    }
+    const shareData = {
+      title: "攀了个岩｜趣玩攀岩挑战",
+      text: content,
+      url: window.location.href.split("#")[0]
+    };
     if (navigator.share) {
-      navigator.share({ title: "趣玩攀岩小游戏", text, url })
-        .then(() => this.showToast("分享已打开"))
-        .catch(() => this.showToast("分享已取消"));
-      return;
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+      }
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(`${text} ${url}`)
-        .then(() => this.showToast("分享文案已复制"))
-        .catch(() => this.showToast("复制失败"));
-      return;
+    try {
+      await navigator.clipboard.writeText(shareData.url);
+      this.showToast("分享链接已复制");
+    } catch (error) {
+      window.prompt("请复制分享链接", shareData.url);
     }
-    this.showToast("当前浏览器不支持分享");
   }
 
   beginCharge() {
@@ -3275,6 +3610,11 @@ class Game {
     this.player.applyChargePose(this.currentHold, this.targetHold, this.charge);
     this.audio.playCharge(this.chargeDirection);
     this.state = STATE.CHARGING;
+    reportQuwanEvent("charge_start", {
+      score: this.score,
+      hold_index: this.holdCount,
+      theme_id: this.holdAssets.currentThemeId || ""
+    });
   }
   updateCharge(deltaTime) {
     const isTutorialCharge = this.holdCount === 0 && this.tutorialActive;
@@ -3319,6 +3659,10 @@ class Game {
     if (this.state !== STATE.CHARGING) {
       return;
     }
+    reportQuwanEvent("charge_release", {
+      charge_percent: Math.round(this.charge * 100),
+      hold_index: this.holdCount
+    });
     if (this.holdCount === 0 && this.tutorialActive && this.tutorialPhase !== "release") {
       this.tutorialEarlyRelease = true;
       this.resetTutorialCharge();
@@ -3547,6 +3891,8 @@ class Game {
     this.applyAccuracyScore(this.animationResult || this.pendingAttempt);
     const crossedMilestones = this.getCrossedAutoClimbMilestones(previousScore);
     this.audio.playGrabRank(this.feedback.tier, this.feedback.combo);
+    // 爬到岩点：腾讯新闻端内震动反馈（强度 0.5），详见 qqnews-utils.js
+    if (window.qqNewsHaptics) window.qqNewsHaptics.vibrate(0.5);
     const grabbedPowerUp = this.targetHold.powerUp;
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
@@ -3560,6 +3906,11 @@ class Game {
     }
     this.holdCount += 1;
     this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    reportQuwanEvent("grab_success", {
+      score: this.score,
+      hold_count: this.holdCount,
+      accuracy: this.feedback && this.feedback.tier || ""
+    });
     if (this.tutorialCompletionPending) {
       this.tutorialCompletionPending = false;
       if (!this.tutorialCompletionShown) {
@@ -3743,6 +4094,8 @@ class Game {
     this.holdCount += 1;
     this.climbHeight = this.calculateClimbHeightFromCurrentHold();
     this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
+    // 火箭自动攀爬爬到岩点：腾讯新闻端内震动反馈（强度 0.5），详见 qqnews-utils.js
+    if (window.qqNewsHaptics) window.qqNewsHaptics.vibrate(0.5);
     if (grabbedPowerUp) {
       this.activatePowerUp(grabbedPowerUp);
     }
@@ -3769,6 +4122,8 @@ class Game {
   }
 
   finishAutoClimb() {
+    const shouldFinishRound = this.pendingRocketGameOver;
+    const fallResult = this.pendingRocketFallResult || "tooWeak";
     this.autoClimb.active = false;
     this.autoClimb.phase = null;
     this.autoClimb.remaining = 0;
@@ -3782,6 +4137,19 @@ class Game {
     this.poseCharge = 0;
     this.player.stopIdleRest();
     this.player.animationStage = STATE.READY;
+    if (shouldFinishRound) {
+      this.pendingRocketGameOver = false;
+      this.pendingRocketFallResult = null;
+      reportQuwanEvent("rocket_auto_rescue_complete", {
+        score: this.score,
+        height: Math.round(this.climbHeight)
+      });
+      this.finalizeRoundScore();
+      this.recoveringFromMiss = false;
+      this.player.beginFall(fallResult, this.targetHold, false);
+      this.state = STATE.FALLING;
+      return;
+    }
     this.state = STATE.READY;
     this.showToast("\u7206\u53d1\u7ed3\u675f\uff0c\u7ee7\u7eed\u6500\u722c\uff01");
   }
@@ -3793,6 +4161,32 @@ class Game {
     this.preciseCombo = 0;
     this.livesRemaining = Math.max(0, this.livesRemaining - 1);
     this.recoveringFromMiss = this.livesRemaining > 0;
+    reportQuwanEvent("grab_fail", {
+      reason: this.failureReason,
+      score: this.score,
+      lives_remaining: this.livesRemaining
+    });
+    const rescueRocketCount = !this.recoveringFromMiss
+      ? Math.max(0, Math.floor(Number(this.autoClimb.rockets) || 0))
+      : 0;
+    if (rescueRocketCount > 0) {
+      this.autoClimb.rockets = 0;
+      this.pendingRocketGameOver = true;
+      this.pendingRocketFallResult = result;
+      this.rocketHintActive = false;
+      this.rocketMaxPrompted = false;
+      this.charge = 0;
+      this.chargeDirection = 1;
+      this.poseCharge = 0;
+      reportQuwanEvent("rocket_auto_rescue", {
+        rocket_count: rescueRocketCount,
+        score: this.score,
+        height: Math.round(this.climbHeight)
+      });
+      this.beginAutoClimb(rescueRocketCount);
+      this.showToast(`生命耗尽，自动使用 ${rescueRocketCount} 个小火箭！`);
+      return;
+    }
     if (!this.recoveringFromMiss) {
       this.finalizeRoundScore();
     } else {
@@ -3972,12 +4366,13 @@ class Game {
     this.tutorialCompletionShown = true;
     this.tutorialCompleteTime = this.tutorialCompleteDuration;
     this.tutorialCompleteAwaitingDismiss = true;
-    localStorage.setItem("climbGame_tutorial_completed", "1");
+    this.saveTutorialDismissedPreference();
   }
 
   dismissTutorialComplete() {
     this.tutorialCompleteTime = 0;
     this.tutorialCompleteAwaitingDismiss = false;
+    this.tutorialCompleteCloseRect = null;
     if (this.pendingAttempt && this.pendingAttempt.scoreConfirmed) {
       this.completePostGrabPresentation();
       this.state = STATE.READY;
@@ -4002,6 +4397,13 @@ class Game {
       height: this.climbHeight,
       score: this.score,
       duration: this.finalRoundDuration
+    });
+    reportQuwanEvent("game_over", {
+      score: this.score,
+      holds: this.holdCount,
+      height: Math.round(this.climbHeight),
+      duration_ms: Math.round(this.finalRoundDuration * 1000),
+      reason: this.failureReason || ""
     });
   }
 
@@ -4435,14 +4837,14 @@ class Game {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#ff5f8c";
-    ctx.font = "900 16px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 16px Arial, Helvetica, sans-serif");
     ctx.fillText("\u7206\u53d1\u6500\u722c", x + 14, y + h / 2);
     ctx.fillStyle = "#ff5f8c";
-    ctx.font = "900 18px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 18px Arial, Helvetica, sans-serif");
     ctx.fillText("\u00d72", x + 96, y + h / 2);
     ctx.textAlign = "right";
     ctx.fillStyle = "#4bb8d6";
-    ctx.font = "900 15px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 15px Arial, Helvetica, sans-serif");
     ctx.fillText(remaining > 0 ? remaining.toFixed(1) + "s" : "\u6700\u540e\u4e00\u6293", x + w - 14, y + h / 2);
 
     ctx.fillStyle = "rgba(255, 95, 140, 0.22)";
@@ -4456,12 +4858,13 @@ class Game {
   }
 
   drawRocketButton(ctx) {
-    if (this.state === STATE.START || this.state === STATE.LOADING || this.roundEnded || this.tutorialActive || this.autoClimb.active) {
+    if (this.state === STATE.START || this.state === STATE.LOADING || this.roundEnded || this.tutorialActive) {
       this.rocketButtonRect = null;
       this.rocketIconRects = [];
       return;
     }
     const rockets = this.autoClimb.rockets;
+    const isAutoClimbing = this.autoClimb.active;
     if (rockets <= 0) {
       this.rocketButtonRect = null;
       this.rocketIconRects = [];
@@ -4477,6 +4880,7 @@ class Game {
     const baseY = CONFIG.safeTop + 108;
 
     this.rocketIconRects = [];
+    ctx.globalAlpha = isAutoClimbing ? 0.84 : 1;
 
     for (let i = 0; i < rockets; i += 1) {
       const ix = baseX + i * (iconSize + gap);
@@ -4487,21 +4891,53 @@ class Game {
       // 火箭图标
       const asset = this.uiIconAssets["rocket"];
       if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+        ctx.save();
+        ctx.shadowColor = "#ffffff";
+        ctx.shadowBlur = 0;
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+            if (offsetX === 0 && offsetY === 0) continue;
+            ctx.shadowOffsetX = offsetX;
+            ctx.shadowOffsetY = offsetY;
+            ctx.drawImage(asset.image, ix, iy, iconSize, iconSize);
+          }
+        }
+        ctx.restore();
         ctx.drawImage(asset.image, ix, iy, iconSize, iconSize);
       } else {
         // fallback
         ctx.fillStyle = "#ffd93d";
-        ctx.font = "bold 24px Arial";
+        setCanvasFont(ctx, "bold 24px Arial");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.strokeText("\uD83D\uDE80", ix + iconSize / 2, iy + iconSize / 2);
         ctx.fillText("\uD83D\uDE80", ix + iconSize / 2, iy + iconSize / 2);
       }
+    }
+    ctx.globalAlpha = 1;
+
+    if (isAutoClimbing) {
+      const statusText = `爆发中 · 剩余 ${rockets}`;
+      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
+      const statusPadX = 9;
+      const statusW = ctx.measureText(statusText).width + statusPadX * 2;
+      const statusH = 24;
+      const statusY = baseY + iconSize + 7;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+      this.roundRect(ctx, baseX, statusY, statusW, statusH, statusH / 2);
+      ctx.fill();
+      ctx.fillStyle = "#ff5f8c";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(statusText, baseX + statusPadX, statusY + statusH / 2 + 0.5);
     }
 
     // 首次收集火箭提示：图标下方一行小字（5秒渐隐）
     if (this.rocketHintActive && this.rocketHintTimer > 0) {
       const hintText = "点击小火箭开启3秒爆发无敌时间";
-      ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
       const hpad = 11;
       const hw = ctx.measureText(hintText).width + hpad * 2;
       const hh = 26;
@@ -4524,13 +4960,15 @@ class Game {
     }
 
     // 整体点击区域（兼容）
-    this.rocketButtonRect = {
-      id: "rocket",
-      x: baseX,
-      y: baseY,
-      w: rockets * iconSize + (rockets - 1) * gap,
-      h: iconSize
-    };
+    this.rocketButtonRect = isAutoClimbing
+      ? null
+      : {
+          id: "rocket",
+          x: baseX,
+          y: baseY,
+          w: rockets * iconSize + (rockets - 1) * gap,
+          h: iconSize
+        };
 
     ctx.restore();
   }
@@ -4555,7 +4993,7 @@ class Game {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "rgba(255, 255, 255, 0.98)";
-      ctx.font = "900 42px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "900 42px Arial, Helvetica, sans-serif");
       ctx.lineWidth = 7;
       ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
       ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 250);
@@ -4563,7 +5001,7 @@ class Game {
     }
 
     ctx.fillStyle = "#315f72";
-    ctx.font = "bold 16px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
     ctx.fillText(this.loadingMessage, CONFIG.logicalWidth / 2, 316);
 
     const w = 238;
@@ -4587,7 +5025,7 @@ class Game {
     ctx.restore();
 
     ctx.fillStyle = "rgba(49, 95, 114, 0.74)";
-    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
     ctx.fillText(`${Math.round(progress * 100)}%`, CONFIG.logicalWidth / 2, y + 45);
     ctx.restore();
   }
@@ -4672,7 +5110,7 @@ class Game {
       ctx.stroke();
 
       if (isMajor) {
-        ctx.font = "bold 18px Arial, Helvetica, sans-serif";
+        setCanvasFont(ctx, "bold 18px Arial, Helvetica, sans-serif");
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
         ctx.fillText(`${Math.round(meters)} m`, x + tickLength + 7, y);
@@ -5895,11 +6333,9 @@ class Game {
     }
     if (isFront && this.outfit && this.outfit.hair === "hair_male" && this.playerAssets.isReady("headMaleFront")) {
       const yOffset = 3;
-      // 试衣间预览态用开心表情，其余（攀爬/下落）保持原表情
-      const maleDrawName =
-        this._outfitPreviewMode && this.playerAssets.isReady("headMaleFrontHappy")
-          ? "headMaleFrontHappy"
-          : "headMaleFront";
+      const maleDrawName = this._outfitPreviewMode && this.playerAssets.isReady("headMaleFrontHappy")
+        ? "headMaleFrontHappy"
+        : "headMaleFront";
       this.drawEndpointSprite(ctx, maleDrawName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitGlasses(ctx, head, true, yOffset);
       return;
@@ -5907,11 +6343,9 @@ class Game {
     const assetName = isFront ? "headFront" : "headBack";
     if (this.playerAssets.isReady(assetName)) {
       const yOffset = isFront ? 3 : 1;
-      // 试衣间预览态用开心表情，其余（攀爬/下落）保持原表情
-      const drawName =
-        isFront && this._outfitPreviewMode && this.playerAssets.isReady("headFrontHappy")
-          ? "headFrontHappy"
-          : assetName;
+      const drawName = isFront && this._outfitPreviewMode && this.playerAssets.isReady("headFrontHappy")
+        ? "headFrontHappy"
+        : assetName;
       this.drawEndpointSprite(ctx, drawName, { x: head.x, y: head.y + yOffset }, 0.145 * CONFIG.headSpriteScale);
       this.drawOutfitHair(ctx, head, isFront, yOffset);
       this.drawOutfitGlasses(ctx, head, isFront, yOffset);
@@ -6193,24 +6627,27 @@ class Game {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 22px Arial, Helvetica, sans-serif");
     ctx.fillText("得分", CONFIG.safeSide + 3, CONFIG.safeTop + 52);
-    ctx.font = "900 25px Arial, Helvetica, sans-serif";
-    ctx.fillText(String(this.score), CONFIG.safeSide + 62, CONFIG.safeTop + 52);
-    this.drawLives(ctx, CONFIG.safeSide + 132, CONFIG.safeTop + 52);
+    setCanvasFont(ctx, "900 25px Arial, Helvetica, sans-serif");
+    const scoreText = String(this.score);
+    const scoreX = CONFIG.safeSide + 62;
+    ctx.fillText(scoreText, scoreX, CONFIG.safeTop + 52);
+    const scoreWidth = ctx.measureText(scoreText).width;
+    const livesX = Math.max(CONFIG.safeSide + 132, scoreX + scoreWidth + 14);
+    this.drawLives(ctx, livesX, CONFIG.safeTop + 52);
 
     this.drawPowerUpStatus(ctx);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.font = "900 15px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 15px Arial, Helvetica, sans-serif");
     ctx.fillText("当前高度", CONFIG.safeSide + 3, CONFIG.safeTop + 84);
     ctx.fillText("最高纪录：", 200, CONFIG.safeTop + 84);
 
-    ctx.font = "900 18px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 18px Arial, Helvetica, sans-serif");
     ctx.fillText(formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), 118, CONFIG.safeTop + 84);
     ctx.fillText(formatMeters(this.scoreManager.best.height / CONFIG.pixelsPerMeter), 292, CONFIG.safeTop + 84);
 
-    // 弧形蓄力条：仅在玩家按住蓄力时出现，不点击不显示
     if (this.state === STATE.CHARGING) {
       this.drawChargeBar(ctx);
     }
@@ -6223,7 +6660,7 @@ class Game {
     ctx.save();
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 22px Arial, Helvetica, sans-serif");
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     const gap = 22;
@@ -6251,7 +6688,7 @@ class Game {
     }
     ctx.save();
     ctx.textBaseline = "middle";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
     const gap = 8;
     const padX = 12;
     const boxH = 30;
@@ -6332,9 +6769,9 @@ class Game {
     const feedbackAlpha = 1 - exitT;
     const slideOffset = exitT > 0 ? lerp(0, -46, exitT) : lerp(52, 0, enterT);
     const layouts = {
-      good: { badgeX: 97, badgeY: 103, badgeW: 180, pointsX: 239, pointsY: 149, comboX: 239, comboY: 168 },
-      risky: { badgeX: 100, badgeY: 103, badgeW: 180, pointsX: 250, pointsY: 153, comboX: 239, comboY: 168 },
-      precise: { badgeX: 98, badgeY: 103, badgeW: 180, pointsX: 241, pointsY: 153, comboX: 239, comboY: 168 }
+      good: { badgeX: 97, badgeY: 133, badgeW: 180, pointsX: 239, pointsY: 179, comboX: 239, comboY: 198 },
+      risky: { badgeX: 100, badgeY: 133, badgeW: 180, pointsX: 250, pointsY: 183, comboX: 239, comboY: 198 },
+      precise: { badgeX: 98, badgeY: 133, badgeW: 180, pointsX: 241, pointsY: 183, comboX: 239, comboY: 198 }
     };
     const layout = layouts[this.feedback.tier] || layouts.risky;
     const badge = this.feedbackAssets[this.feedback.tier];
@@ -6347,7 +6784,7 @@ class Game {
       this.roundRect(ctx, layout.badgeX + slideOffset, layout.badgeY + 22, 178, 50, 18);
       ctx.fill();
       ctx.fillStyle = tier.color;
-      ctx.font = "900 30px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "900 30px Arial, Helvetica, sans-serif");
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(this.feedback.label, layout.badgeX + slideOffset + 89, layout.badgeY + 47);
@@ -6367,7 +6804,7 @@ class Game {
     ctx.globalAlpha = alpha;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.font = "900 25px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 25px Arial, Helvetica, sans-serif");
     ctx.lineJoin = "round";
     ctx.lineWidth = 6;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
@@ -6396,7 +6833,7 @@ class Game {
     ctx.globalAlpha = alpha;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.font = "900 16px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 16px Arial, Helvetica, sans-serif");
     ctx.lineWidth = 5;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
     ctx.fillStyle = ACCURACY_TIERS.precise.color;
@@ -6421,11 +6858,11 @@ class Game {
       const textY = y + 19 + index * 35;
       const compact = row.label.length > 3;
       ctx.fillStyle = THEME.ui.text;
-      ctx.font = `bold ${compact ? 16 : 18}px Arial, Helvetica, sans-serif`;
+      setCanvasFont(ctx, `bold ${compact ? 16 : 18}px Arial, Helvetica, sans-serif`);
       ctx.fillText(row.label, x + 14, textY);
       const labelWidth = ctx.measureText(row.label).width;
       ctx.fillStyle = row.color;
-      ctx.font = `bold ${compact ? 19 : 21}px Arial, Helvetica, sans-serif`;
+      setCanvasFont(ctx, `bold ${compact ? 19 : 21}px Arial, Helvetica, sans-serif`);
       ctx.fillText(row.value, x + 14 + labelWidth + 3, textY - 2);
     });
 
@@ -6449,21 +6886,16 @@ class Game {
     }
   }
 
-  // 弧形蓄力条几何：一段向上凸起的圆弧（拱形 ∩），悬在小人抓握手上方、跨在绳子上。
-  // 返回弧心、半径、起止角，供绘制与新手目标标记复用。
   getChargeArcGeometry() {
-    const cx = CONFIG.logicalWidth / 2;      // 弧心 X：屏幕中线
-    const cy = 545;                          // 弧心 Y：在小人抓握手下方，使拱顶悬在手上方（实机校准）
-    const radius = 110;                      // 弧半径（越小曲率越大，拱越弯）
-    const spread = 1.12;                     // 半张角（弧度），越大弧度越圆（拱更弯）
-    // Canvas 坐标 y 向下：拱顶正上方对应角度 -π/2。
-    // 从左端(-π+spread) 递增扫到右端(-spread)，中间经过拱顶。
-    const startAngle = -Math.PI + spread;    // 左端
-    const endAngle = -spread;                // 右端
+    const cx = CONFIG.logicalWidth / 2;
+    const cy = 545;
+    const radius = 110;
+    const spread = 1.12;
+    const startAngle = -Math.PI + spread;
+    const endAngle = -spread;
     return { cx, cy, radius, startAngle, endAngle };
   }
 
-  // 沿弧线取参数 t(0~1) 对应的点坐标（t=0 左端 → t=1 右端）
   chargeArcPointAt(t) {
     const { cx, cy, radius, startAngle, endAngle } = this.getChargeArcGeometry();
     const angle = startAngle + (endAngle - startAngle) * clamp(t, 0, 1);
@@ -6472,29 +6904,25 @@ class Game {
 
   drawChargeBar(ctx) {
     const { cx, cy, radius, startAngle, endAngle } = this.getChargeArcGeometry();
-    const band = 15;                         // 弧带宽度
+    const band = 15;
     const outerR = radius + band / 2;
     const innerR = radius - band / 2;
+    const charge = clamp(this.charge, 0, 1);
 
     ctx.save();
     ctx.lineCap = "round";
-
-    // 外框（白色描边胶囊弧）
     ctx.strokeStyle = "rgba(255,255,255,0.98)";
     ctx.lineWidth = band + 7;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, startAngle, endAngle, false);
     ctx.stroke();
 
-    // 轨道底色
     ctx.strokeStyle = THEME.charge.base;
     ctx.lineWidth = band;
     ctx.beginPath();
     ctx.arc(cx, cy, radius, startAngle, endAngle, false);
     ctx.stroke();
 
-    // 蓄力填充（从左端起沿弧线增长，渐变绿→黄→橙→红）
-    const charge = clamp(this.charge, 0, 1);
     if (charge > 0.01) {
       const fillEnd = startAngle + (endAngle - startAngle) * charge;
       const gradient = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy);
@@ -6509,43 +6937,38 @@ class Game {
       ctx.stroke();
     }
 
-    // 刻度分隔线（3 条，把弧分成 4 段）
     ctx.strokeStyle = "rgba(255,255,255,0.85)";
     ctx.lineWidth = 2;
     ctx.lineCap = "butt";
-    for (let i = 1; i <= 3; i += 1) {
-      const angle = startAngle + (endAngle - startAngle) * (i / 4);
-      const ca = Math.cos(angle);
-      const sa = Math.sin(angle);
+    for (let index = 1; index <= 3; index += 1) {
+      const angle = startAngle + (endAngle - startAngle) * (index / 4);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
       ctx.beginPath();
-      ctx.moveTo(cx + ca * (innerR + 1.5), cy + sa * (innerR + 1.5));
-      ctx.lineTo(cx + ca * (outerR - 1.5), cy + sa * (outerR - 1.5));
+      ctx.moveTo(cx + cos * (innerR + 1.5), cy + sin * (innerR + 1.5));
+      ctx.lineTo(cx + cos * (outerR - 1.5), cy + sin * (outerR - 1.5));
       ctx.stroke();
     }
 
-    // 倒三角力度标注：跟随当前蓄力值沿弧外侧移动，尖端指向弧带
     const markAngle = startAngle + (endAngle - startAngle) * charge;
-    const ca = Math.cos(markAngle);
-    const sa = Math.sin(markAngle);
-    const tipR = outerR + 1;                 // 三角尖端（贴近弧带外缘）
-    const baseR = outerR + 17;               // 三角底边（更外侧）
-    const tipX = cx + ca * tipR;
-    const tipY = cy + sa * tipR;
-    // 沿弧的切向方向作为三角底边展开方向
-    const tangX = -sa;
-    const tangY = ca;
-    const half = 8.5;                        // 三角底边半宽
-    const bcx = cx + ca * baseR;
-    const bcy = cy + sa * baseR;
-    // 三角填充色跟随蓄力档位（与弧带渐变一致的感觉）
-    const markColor =
-      charge < 0.45 ? THEME.charge.green :
-      charge < 0.68 ? THEME.charge.yellow :
-      charge < 0.9 ? THEME.charge.orange : THEME.charge.red;
+    const cos = Math.cos(markAngle);
+    const sin = Math.sin(markAngle);
+    const tipR = outerR + 1;
+    const baseR = outerR + 17;
+    const tangentX = -sin;
+    const tangentY = cos;
+    const half = 8.5;
+    const baseX = cx + cos * baseR;
+    const baseY = cy + sin * baseR;
+    const markColor = charge < 0.45
+      ? THEME.charge.green
+      : charge < 0.68
+        ? THEME.charge.yellow
+        : charge < 0.9 ? THEME.charge.orange : THEME.charge.red;
     ctx.beginPath();
-    ctx.moveTo(tipX, tipY);
-    ctx.lineTo(bcx + tangX * half, bcy + tangY * half);
-    ctx.lineTo(bcx - tangX * half, bcy - tangY * half);
+    ctx.moveTo(cx + cos * tipR, cy + sin * tipR);
+    ctx.lineTo(baseX + tangentX * half, baseY + tangentY * half);
+    ctx.lineTo(baseX - tangentX * half, baseY - tangentY * half);
     ctx.closePath();
     ctx.fillStyle = markColor;
     ctx.strokeStyle = "rgba(255,255,255,0.95)";
@@ -6553,21 +6976,21 @@ class Game {
     ctx.lineJoin = "round";
     ctx.fill();
     ctx.stroke();
-
     ctx.restore();
   }
 
   drawUiControls(ctx) {
-    const size = 40;
-    const gap = 9;
-    const y = CONFIG.topControlsY;
+    const { size, gap, y } = getTopControlMetrics();
+    const showCustomNav = Boolean(QUWAN_PLATFORM && QUWAN_PLATFORM.usesCustomTitleBar());
     const buttons = this.state === STATE.START
-      ? [
-          { id: "back", x: CONFIG.safeSide + 4, y },
-          { id: "tutorial", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 3 - gap * 2, y },
-          { id: "sound", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 2 - gap, y },
-          { id: "share", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size, y }
-        ]
+      ? (() => {
+          const result = [];
+          if (showCustomNav) result.push({ id: "back", x: CONFIG.safeSide + 4, y });
+          result.push({ id: "tutorial", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 3 - gap * 2, y });
+          result.push({ id: "sound", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size * 2 - gap, y });
+          result.push({ id: "share", x: CONFIG.logicalWidth - CONFIG.safeSide - 4 - size, y });
+          return result;
+        })()
       : (() => {
           const ids = ["skin", "rank", "sound", "share"];
           const marginRight = CONFIG.safeSide + 4;
@@ -6677,7 +7100,7 @@ class Game {
       ctx.closePath();
       ctx.stroke();
     } else if (id === "tutorial") {
-      ctx.font = "900 24px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "900 24px Arial, Helvetica, sans-serif");
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.lineJoin = "round";
@@ -6767,15 +7190,20 @@ class Game {
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
 
     const titleAsset = this.figmaUiAssets && this.figmaUiAssets.coverTitle;
-    if (!this.drawImageAssetContain(ctx, titleAsset, 51, 38, 261, 261)) {
+    const baseTitleY = QUWAN_PLATFORM && QUWAN_PLATFORM.usesCustomTitleBar() ? 112 : 38;
+    const topControls = getTopControlMetrics();
+    const titleY = topControls.displayScale < 1
+      ? Math.max(baseTitleY, topControls.y + topControls.size + 8)
+      : baseTitleY;
+    if (!this.drawImageAssetContain(ctx, titleAsset, 51, titleY, 261, 261)) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-      ctx.font = "900 50px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "900 50px Arial, Helvetica, sans-serif");
       ctx.lineWidth = 8;
       ctx.strokeStyle = "rgba(52, 154, 180, 0.42)";
-      ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, 158);
-      ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, 158);
+      ctx.strokeText("攀了个岩", CONFIG.logicalWidth / 2, titleY + 120);
+      ctx.fillText("攀了个岩", CONFIG.logicalWidth / 2, titleY + 120);
     }
 
     this.drawFigmaStartButton(ctx, "play", "startButton", 73, 544, 217, 56);
@@ -6796,35 +7224,197 @@ class Game {
     return;
   }
 
-  getLeaderboardData() {
-    const opponents = [
-      { name: "岩壁飞鸟", score: 1280, heightMeters: 18.4, duration: 155, avatar: "hairFemaleFront" },
-      { name: "向上生长", score: 1090, heightMeters: 17.1, duration: 132, avatar: "hairMaleFront" },
-      { name: "粉袋不离身", score: 870, heightMeters: 16.2, duration: 118, avatar: "hair02Front" },
-      { name: "今天也要登顶", score: 760, heightMeters: 15.3, duration: 105, avatar: "hairFemaleFront" },
-      { name: "岩点观察员", score: 640, heightMeters: 14.7, duration: 98, avatar: "hairMaleFront" },
-      { name: "动态选手", score: 540, heightMeters: 13.9, duration: 90, avatar: "hair02Front" },
-      { name: "再高一点点", score: 470, heightMeters: 12.8, duration: 80, avatar: "hairFemaleFront" },
-      { name: "稳稳抓住", score: 380, heightMeters: 11.6, duration: 72, avatar: "hairMaleFront" }
-    ];
+  async requestStartGame() {
+    const loggedIn = Boolean(QUWAN_PLATFORM && QUWAN_PLATFORM.isLoggedIn());
+    this.loggedInUser = loggedIn ? QUWAN_PLATFORM.getCurrentUser() : null;
+    this.guestRankingMode = !loggedIn;
+    reportQuwanEvent(loggedIn ? "game_start_logged_in" : "game_start_guest", {});
+    this.startGame();
+  }
+
+  async openRankingWithLogin() {
+    if (!QUWAN_PLATFORM) {
+      this.remoteLeaderboard = { status: "error", entries: [], own: null, error: "平台能力未加载" };
+      return;
+    }
+    if (QUWAN_PLATFORM.isQQNews()) {
+      this.remoteLeaderboard = { status: "loading", entries: [], own: null, error: "正在登录…" };
+      this.loggedInUser = QUWAN_PLATFORM.getCurrentUser();
+      if (!this.loggedInUser) {
+        const loginResult = await QUWAN_PLATFORM.ensureLogin();
+        if (loginResult.success) {
+          this.loggedInUser = loginResult.userInfo || QUWAN_PLATFORM.getCurrentUser();
+          this.guestRankingMode = false;
+          this.uiToast = null;
+          this.uiToastTime = 0;
+        } else {
+          this.guestRankingMode = true;
+          this.showToast("游客可查看榜单，但本机成绩不参与排名");
+        }
+      }
+    }
+    const bestRecord = this.scoreManager.best;
+    const bestScore = Math.max(0, Math.floor(Number(bestRecord.score) || 0));
+    const shouldInitializeRanking = Boolean(this.loggedInUser && bestScore > 0);
+    await this.loadRemoteLeaderboard(shouldInitializeRanking, bestRecord);
+  }
+
+  async loadRemoteLeaderboard(submitCurrentScore, recordOverride = null) {
+    const record = recordOverride && typeof recordOverride === "object"
+      ? recordOverride
+      : {
+          score: recordOverride == null ? this.score : recordOverride,
+          height: this.climbHeight,
+          duration: this.roundEnded ? this.finalRoundDuration : this.roundElapsed
+        };
+    const scoreToSubmit = submitCurrentScore
+      ? Math.max(0, Math.floor(Number(record.score) || 0))
+      : 0;
+    const heightToSubmit = Math.max(0, Number(record.height) || 0) / CONFIG.pixelsPerMeter;
+    const durationToSubmit = Math.max(0, Number(record.duration) || 0);
+    this.remoteLeaderboard = {
+      status: "loading",
+      entries: [],
+      own: this.createLoggedInOwnRanking(),
+      error: ""
+    };
+    reportQuwanEvent("ranking_request", {
+      submit_score: submitCurrentScore ? 1 : 0,
+      score: scoreToSubmit,
+      height: Math.round(heightToSubmit * 10) / 10,
+      duration: Math.round(durationToSubmit)
+    });
+    if (!QUWAN_PLATFORM) {
+      this.remoteLeaderboard = { status: "error", entries: [], own: null, error: "平台能力未加载" };
+      return;
+    }
+    let loggedIn = typeof QUWAN_PLATFORM.isLoggedIn === "function" && QUWAN_PLATFORM.isLoggedIn();
+    if (submitCurrentScore && !loggedIn && QUWAN_PLATFORM.isQQNews()) {
+      reportQuwanEvent("login_required", { source: "score_submit" });
+      const loginResult = await QUWAN_PLATFORM.ensureLogin();
+      if (loginResult.success) {
+        this.loggedInUser = loginResult.userInfo || QUWAN_PLATFORM.getCurrentUser();
+        loggedIn = true;
+        this.showToast("登录成功，本局成绩正在提交");
+      } else {
+        this.showToast("未登录，本局成绩不会计入排行榜");
+      }
+    }
+    this.guestRankingMode = !loggedIn;
+    const shouldSubmitScore = submitCurrentScore && loggedIn;
+    if (submitCurrentScore && !loggedIn) {
+      reportQuwanEvent("ranking_submit_skipped", { reason: "guest" });
+    }
+    const result = shouldSubmitScore
+      ? await QUWAN_PLATFORM.submitScore(scoreToSubmit, {
+          height: heightToSubmit,
+          duration: durationToSubmit
+        })
+      : await QUWAN_PLATFORM.getRankingBoard();
+    if (result.localPreview) {
+      this.remoteLeaderboard = {
+        status: "local",
+        entries: [],
+        own: this.createLoggedInOwnRanking(),
+        error: "本地预览不会请求正式排行榜"
+      };
+      return;
+    }
+    if (!result.success) {
+      this.remoteLeaderboard = {
+        status: "error",
+        entries: [],
+        own: this.createLoggedInOwnRanking(),
+        error: result.error || "排行榜加载失败"
+      };
+      this.showToast(this.guestRankingMode
+        ? "未登录，成绩不会计入排行榜"
+        : this.remoteLeaderboard.error);
+      return;
+    }
+    this.remoteLeaderboard = {
+      status: "ready",
+      entries: result.data && result.data.entries || [],
+      own: this.guestRankingMode ? null : result.data && result.data.own || this.createLoggedInOwnRanking(),
+      error: ""
+    };
+  }
+
+  createLoggedInOwnRanking() {
+    const user = this.loggedInUser
+      || QUWAN_PLATFORM && typeof QUWAN_PLATFORM.getCurrentUser === "function" && QUWAN_PLATFORM.getCurrentUser();
+    if (!user) return null;
     const best = this.scoreManager.best;
-    const own = {
-      name: "我的最高记录",
+    return {
+      rank: 0,
       score: Number(best.score) || 0,
-      heightMeters: (Number(best.height) || 0) / CONFIG.pixelsPerMeter,
-      duration: Number(best.duration) || Math.max(32, Math.round(((Number(best.height) || 0) / CONFIG.pixelsPerMeter) * 6)),
+      height: (Number(best.height) || 0) / CONFIG.pixelsPerMeter,
+      duration: Number(best.duration) || 0,
+      nickname: user.nickname || "腾讯新闻用户",
+      userId: user.userId || "",
+      avatar: user.avatar || ""
+    };
+  }
+
+  getLeaderboardData() {
+    const remote = this.remoteLeaderboard || { status: "idle", entries: [], own: null };
+    const best = this.scoreManager.best;
+    const currentUser = this.loggedInUser
+      || QUWAN_PLATFORM && typeof QUWAN_PLATFORM.getCurrentUser === "function" && QUWAN_PLATFORM.getCurrentUser();
+    const entries = remote.entries.map((entry, index) => {
+      const entryRank = Number(entry.rank) || index + 1;
+      const entryScore = Number(entry.score) || 0;
+      const isOwnEntry = Boolean(remote.own && (
+        Number(remote.own.rank) > 0 && entryRank === Number(remote.own.rank)
+        || entry.userId && currentUser && currentUser.userId && entry.userId === currentUser.userId
+        || currentUser && entry.nickname === currentUser.nickname
+          && entry.avatar && currentUser.avatar && entry.avatar === currentUser.avatar
+      ));
+      const canUseLocalBest = isOwnEntry && entryScore === Number(best.score);
+      const height = Number(entry.height) > 0
+        ? Number(entry.height)
+        : canUseLocalBest ? (Number(best.height) || 0) / CONFIG.pixelsPerMeter : 0;
+      const duration = Number(entry.duration) > 0
+        ? Number(entry.duration)
+        : canUseLocalBest ? Number(best.duration) || 0 : 0;
+      return {
+        name: entry.nickname || "匿名用户",
+        score: entryScore,
+        rank: entryRank,
+        avatarUrl: entry.avatar || "",
+        avatar: index % 2 === 0 ? "hairFemaleFront" : "hairMaleFront",
+        detail: `高度 ${height > 0 ? formatMeters(height) : "--"} · 用时 ${duration > 0 ? formatDuration(duration) : "--"}`
+      };
+    });
+    const own = remote.own ? {
+      name: remote.own.nickname || "我的最高记录",
+      score: Number(remote.own.score) || Number(best.score) || 0,
+      rank: Number(remote.own.rank) || 0,
+      avatarUrl: remote.own.avatar || "",
       avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
+      detail: `高度 ${Number(remote.own.height) > 0
+        ? formatMeters(Number(remote.own.height))
+        : formatMeters((Number(best.height) || 0) / CONFIG.pixelsPerMeter)} · 用时 ${Number(remote.own.duration) > 0
+        ? formatDuration(Number(remote.own.duration))
+        : formatDuration(Number(best.duration) || 0)}`,
+      isOwn: true
+    } : {
+      name: this.guestRankingMode ? "游客本机记录" : "我的本机记录",
+      score: Number(best.score) || 0,
+      rank: 0,
+      avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
+      detail: this.guestRankingMode
+        ? "游客成绩未计入排行"
+        : `高度 ${formatMeters((Number(best.height) || 0) / CONFIG.pixelsPerMeter)} · 用时 ${formatDuration(Number(best.duration) || 0)}`,
       isOwn: true
     };
-    const ranked = [...opponents, own]
-      .sort((a, b) => b.score - a.score || b.heightMeters - a.heightMeters || a.duration - b.duration)
-      .map((row, index) => ({ ...row, rank: index + 1 }));
-    const ownRanked = ranked.find((row) => row.isOwn) || { ...own, rank: ranked.length };
-    const previous = ownRanked.rank > 1 ? ranked[ownRanked.rank - 2] : null;
+    const previous = own.rank > 1 ? entries.find((row) => row.rank === own.rank - 1) : null;
     return {
-      rows: ranked.slice(0, 7),
-      own: ownRanked,
-      gap: previous ? Math.max(0, previous.score - ownRanked.score) : 0
+      status: remote.status,
+      error: remote.error,
+      rows: entries,
+      own,
+      gap: previous ? Math.max(0, previous.score - own.score) : 0
     };
   }
 
@@ -6842,7 +7432,7 @@ class Game {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = '900 58px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '900 58px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
     ctx.lineJoin = "round";
     ctx.lineWidth = 13;
     ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
@@ -6871,6 +7461,21 @@ class Game {
     const palette = ["#dceef7", "#f7e1e8", "#e7e0f5", "#dff3ea"];
     ctx.fillStyle = row.isOwn ? "#d8f3fb" : palette[row.rank % palette.length];
     ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    const remoteAvatar = this.getRemoteAvatarAsset(row.avatarUrl);
+    if (remoteAvatar && remoteAvatar.loaded && !remoteAvatar.failed) {
+      const image = remoteAvatar.image;
+      const sourceSize = Math.min(image.naturalWidth || image.width, image.naturalHeight || image.height);
+      const sourceX = ((image.naturalWidth || image.width) - sourceSize) / 2;
+      const sourceY = ((image.naturalHeight || image.height) - sourceSize) / 2;
+      ctx.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, x - radius, y - radius, radius * 2, radius * 2);
+      ctx.restore();
+      ctx.strokeStyle = row.isOwn ? "rgba(75, 183, 239, 0.62)" : "rgba(255, 255, 255, 0.96)";
+      ctx.lineWidth = row.isOwn ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
     const head = this.playerAssets.get("headFront");
     if (head && head.loaded && !head.failed) {
       const scale = (radius * 1.52) / Math.max(1, head.image.height);
@@ -6893,7 +7498,34 @@ class Game {
     ctx.stroke();
   }
 
+  getRemoteAvatarAsset(url) {
+    if (!url || typeof url !== "string") return null;
+    const normalizedUrl = url.startsWith("http://") ? `https://${url.slice(7)}` : url;
+    if (!/^https:\/\//i.test(normalizedUrl) && !/^(?:data:|assets\/)/i.test(normalizedUrl)) return null;
+    if (this.remoteAvatarAssets.has(normalizedUrl)) {
+      return this.remoteAvatarAssets.get(normalizedUrl);
+    }
+    const image = new Image();
+    const asset = { image, loaded: false, failed: false };
+    image.referrerPolicy = "no-referrer";
+    image.onload = () => {
+      asset.loaded = true;
+    };
+    image.onerror = () => {
+      asset.failed = true;
+    };
+    image.src = normalizedUrl;
+    this.remoteAvatarAssets.set(normalizedUrl, asset);
+    return asset;
+  }
+
   drawLeaderboardRank(ctx, rank, x, y) {
+    if (!Number.isFinite(rank) || rank <= 0) {
+      ctx.fillStyle = "#708096";
+      setCanvasFont(ctx, '900 16px "Arial Rounded MT Bold", sans-serif');
+      ctx.fillText("--", x, y);
+      return;
+    }
     const medalColors = ["#f8bd32", "#b7c6d0", "#e98a43"];
     if (rank <= 3) {
       ctx.fillStyle = medalColors[rank - 1];
@@ -6904,12 +7536,12 @@ class Game {
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.fillStyle = "#ffffff";
-      ctx.font = '900 14px "Arial Rounded MT Bold", sans-serif';
+      setCanvasFont(ctx, '900 14px "Arial Rounded MT Bold", sans-serif');
       ctx.fillText(String(rank), x, y + 1);
       return;
     }
     ctx.fillStyle = "#219bd3";
-    ctx.font = '900 22px "Arial Rounded MT Bold", sans-serif';
+    setCanvasFont(ctx, '900 22px "Arial Rounded MT Bold", sans-serif');
     ctx.fillText(String(rank), x, y);
   }
 
@@ -6930,15 +7562,15 @@ class Game {
     this.drawLeaderboardAvatar(ctx, row, x + 72, y + h / 2, 20);
     ctx.textAlign = "left";
     ctx.fillStyle = highlighted ? "#178fc7" : "#163d70";
-    ctx.font = '800 14px "PingFang SC", "Microsoft YaHei", sans-serif';
+    setCanvasFont(ctx, '800 14px "PingFang SC", "Microsoft YaHei", sans-serif');
     ctx.fillText(row.name, x + 101, y + h / 2 - 7);
     ctx.textAlign = "right";
     ctx.fillStyle = "#168fc8";
-    ctx.font = '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
     ctx.fillText(`${row.score}分`, x + w - 14, y + h / 2 - 8);
     ctx.fillStyle = "#748097";
-    ctx.font = '700 12px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
-    ctx.fillText(`${row.heightMeters.toFixed(1)} m | ${formatDuration(row.duration)}`, x + w - 14, y + h / 2 + 13);
+    setCanvasFont(ctx, '700 12px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
+    ctx.fillText(row.detail || "正式排行榜", x + w - 14, y + h / 2 + 13);
     ctx.restore();
   }
 
@@ -6977,17 +7609,71 @@ class Game {
     const rowH = 58;
     const rowGap = 7;
     const listY = panelY + 64;
-    data.rows.forEach((row, index) => {
-      this.drawLeaderboardRow(ctx, row, rowX, listY + index * (rowH + rowGap), rowW, rowH, Boolean(row.isOwn));
-    });
-
     const ownY = panelY + panelH - 71;
+    const listBottom = ownY - 20;
+    const listViewportHeight = Math.max(1, listBottom - listY);
+    const listContentHeight = data.rows.length > 0
+      ? data.rows.length * (rowH + rowGap) - rowGap
+      : 0;
+    this.leaderboardMaxScroll = Math.max(0, listContentHeight - listViewportHeight);
+    this.leaderboardScrollOffset = clamp(
+      this.leaderboardScrollOffset,
+      0,
+      this.leaderboardMaxScroll
+    );
+    this.leaderboardScrollRect = {
+      x: rowX - 5,
+      y: listY - 4,
+      w: rowW + 10,
+      h: listViewportHeight + 8
+    };
+    if (data.status === "loading") {
+      ctx.save();
+      ctx.fillStyle = "#55727e";
+      setCanvasFont(ctx, '800 16px "PingFang SC", sans-serif');
+      ctx.textAlign = "center";
+      ctx.fillText(data.error || "正在加载正式排行榜…", CONFIG.logicalWidth / 2, panelY + 150);
+      ctx.restore();
+    } else if (data.rows.length === 0) {
+      ctx.save();
+      ctx.fillStyle = "#55727e";
+      setCanvasFont(ctx, '800 14px "PingFang SC", sans-serif');
+      ctx.textAlign = "center";
+      ctx.fillText(data.error || "排行榜暂无记录", CONFIG.logicalWidth / 2, panelY + 150);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(this.leaderboardScrollRect.x, listY - 2, this.leaderboardScrollRect.w, listViewportHeight + 4);
+      ctx.clip();
+      data.rows.forEach((row, index) => {
+        const rowY = listY + index * (rowH + rowGap) - this.leaderboardScrollOffset;
+        if (rowY + rowH < listY || rowY > listBottom) return;
+        this.drawLeaderboardRow(ctx, row, rowX, rowY, rowW, rowH, Boolean(row.isOwn));
+      });
+      ctx.restore();
+      if (this.leaderboardMaxScroll > 0) {
+        const trackX = panelX + panelW - 8;
+        const thumbH = Math.max(38, listViewportHeight * (listViewportHeight / listContentHeight));
+        const thumbTravel = Math.max(0, listViewportHeight - thumbH);
+        const thumbY = listY + thumbTravel * (this.leaderboardScrollOffset / this.leaderboardMaxScroll);
+        ctx.save();
+        ctx.fillStyle = "rgba(78, 151, 181, 0.16)";
+        this.roundRect(ctx, trackX, listY, 4, listViewportHeight, 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(33, 155, 211, 0.62)";
+        this.roundRect(ctx, trackX, thumbY, 4, thumbH, 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
     if (data.gap > 0) {
       ctx.save();
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#708096";
-      ctx.font = '700 12px "PingFang SC", sans-serif';
+      setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
       ctx.fillText(`距离上一名还差 ${data.gap} 分`, CONFIG.logicalWidth / 2, ownY - 13);
       ctx.restore();
     }
@@ -7055,7 +7741,7 @@ class Game {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#5f6c72";
-    ctx.font = "bold 16px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
     ctx.fillText("试衣间", x + 92, y + 27);
     ctx.restore();
 
@@ -7115,7 +7801,7 @@ class Game {
   drawOutfitShopSection(ctx, section, x1, x2) {
     ctx.save();
     ctx.fillStyle = "#52636b";
-    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText(section.label, x1, section.y + 7);
@@ -7131,7 +7817,7 @@ class Game {
     if (section.note) {
       ctx.save();
       ctx.fillStyle = "rgba(82, 99, 107, 0.58)";
-      ctx.font = "bold 10px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(section.note, (x1 + x2 + cardSize) / 2, section.y + 87);
@@ -7160,7 +7846,7 @@ class Game {
     this.drawOutfitPreviewCharacter(ctx, cx - 70, cy + 12, false);
     this.drawOutfitPreviewCharacter(ctx, cx + 70, cy + 12, true);
     ctx.fillStyle = "rgba(70, 78, 82, 0.58)";
-    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("背面", cx - 70, cy + 118);
@@ -7178,7 +7864,7 @@ class Game {
       animTime: this.player.animTime
     };
     this.camera.y = 0;
-    this._outfitPreviewMode = true;   // 标记：试衣间预览态，drawHead 用开心表情
+    this._outfitPreviewMode = true;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
@@ -7298,7 +7984,7 @@ class Game {
     this.player.bodyAngle = previous.bodyAngle;
     this.player.frontFacingAmount = previous.frontFacingAmount;
     this.player.animTime = previous.animTime;
-    this._outfitPreviewMode = false;  // 复位：仅试衣间预览用开心表情
+    this._outfitPreviewMode = false;
     ctx.restore();
   }
 
@@ -7321,7 +8007,7 @@ class Game {
       this.uiPanel.buttons.push({ id: `outfit-part-${part.id}`, x, y, w: tabW, h: 56 });
       const selected = this.selectedOutfitPart === part.id;
       ctx.fillStyle = selected ? "#12a9df" : "#a9aeb1";
-      ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
       ctx.fillText(part.label, x + tabW / 2, y + 28);
       if (selected) {
         ctx.fillStyle = "#12a9df";
@@ -7339,7 +8025,7 @@ class Game {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillStyle = THEME.ui.text;
-    ctx.font = "bold 19px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 19px Arial, Helvetica, sans-serif");
     ctx.fillText(label, 28, y + 18);
     const card = 62;
     const gap = 16;
@@ -7356,7 +8042,7 @@ class Game {
       ctx.stroke();
       this.drawOutfitOptionPreview(ctx, option.id, x + card / 2, optionY + card / 2);
       ctx.fillStyle = selected ? "#0876bd" : "#8a9398";
-      ctx.font = "bold 12px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
       ctx.textAlign = "center";
       ctx.fillText(option.label, x + card / 2, optionY + card + 18);
     });
@@ -7446,7 +8132,7 @@ class Game {
     ctx.lineWidth = selected ? 2 : 1;
     ctx.stroke();
     ctx.fillStyle = selected ? "#0876bd" : "#315f72";
-    ctx.font = "bold 17px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 17px Arial, Helvetica, sans-serif");
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(selected ? `${label} ✓` : label, x + w / 2, y + h / 2 + 0.5);
@@ -7457,7 +8143,7 @@ class Game {
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
     const paddingX = 18;
     const w = ctx.measureText(this.uiToast).width + paddingX * 2;
     const h = 34;
@@ -7491,9 +8177,8 @@ class Game {
     const target = this.chargeArcPointAt(this.tutorialTargetCharge);
     const targetX = target.x;
     const barY = target.y;
-    // 标记朝向弧外的法线方向（用于引出短线与文字位置）
-    const nx = Math.cos(target.angle);
-    const ny = Math.sin(target.angle);
+    const normalX = Math.cos(target.angle);
+    const normalY = Math.sin(target.angle);
 
     ctx.save();
     ctx.shadowColor = "rgba(255, 255, 255, 0.82)";
@@ -7506,14 +8191,18 @@ class Game {
     ctx.strokeStyle = "rgba(49, 95, 114, 0.82)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(targetX + nx * 12, barY + ny * 12);
-    ctx.lineTo(targetX + nx * 30, barY + ny * 30);
+    ctx.moveTo(targetX + normalX * 12, barY + normalY * 12);
+    ctx.lineTo(targetX + normalX * 30, barY + normalY * 30);
     ctx.stroke();
     ctx.fillStyle = isReleaseStep ? "rgba(255, 255, 255, 0.96)" : "#ffcf47";
-    ctx.font = "900 12px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 12px Arial, Helvetica, sans-serif");
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText(isReleaseStep ? "到位，松手" : "蓄力到这里", targetX + nx * 34, barY + ny * 34);
+    ctx.fillText(
+      isReleaseStep ? "到位，松手" : "蓄力到这里",
+      targetX + normalX * 34,
+      barY + normalY * 34
+    );
     ctx.restore();
 
     ctx.save();
@@ -7529,13 +8218,13 @@ class Game {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = isReleaseStep ? "#ffffff" : "#315f72";
-    ctx.font = "900 22px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 22px Arial, Helvetica, sans-serif");
     const title = isReleaseStep
       ? "现在松开手指"
       : (this.tutorialEarlyRelease ? "再试一次，持续按住" : "按住屏幕蓄力");
     ctx.fillText(title, CONFIG.logicalWidth / 2, y + 33);
     ctx.fillStyle = isReleaseStep ? "rgba(255,255,255,0.9)" : "#5d7480";
-    ctx.font = "bold 15px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
     ctx.fillText(
       isReleaseStep ? "蓄力完成，出手抓住发光岩点" : "等蓄力到达标记处，不要提前松手",
       CONFIG.logicalWidth / 2,
@@ -7548,7 +8237,7 @@ class Game {
     this.roundRect(ctx, stepX, y + 10, stepW, 22, 11);
     ctx.fill();
     ctx.fillStyle = isReleaseStep ? "#ffffff" : "#315f72";
-    ctx.font = "900 11px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 12px Arial, Helvetica, sans-serif");
     ctx.fillText(isReleaseStep ? "2 / 2" : "1 / 2", stepX + stepW / 2, y + 21.5);
     ctx.restore();
 
@@ -7614,6 +8303,8 @@ class Game {
     const w = CONFIG.logicalWidth - 48;
     const h = 236;
     const y = (CONFIG.logicalHeight - h) / 2 + yOffset;
+    const closeRect = { x: x + w - 47, y: y - 9, w: 42, h: 42 };
+    this.tutorialCompleteCloseRect = closeRect;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -7648,14 +8339,14 @@ class Game {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#315f72";
-    ctx.font = "900 21px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "900 21px Arial, Helvetica, sans-serif");
     ctx.fillText("就是这样！", CONFIG.logicalWidth / 2, y + 46);
     ctx.fillStyle = "#55727e";
-    ctx.font = "bold 14px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 14px Arial, Helvetica, sans-serif");
     ctx.fillText("根据下一个发光岩点判断出手力度，", CONFIG.logicalWidth / 2, y + 70);
     ctx.fillText("继续攀爬吧！", CONFIG.logicalWidth / 2, y + 90);
     ctx.fillStyle = "#ff7a3c";
-    ctx.font = "bold 13px Arial, Helvetica, sans-serif";
+    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
     ctx.fillText("力度过小或过大都有可能导致小人掉落哦～", CONFIG.logicalWidth / 2, y + 112);
 
     ctx.strokeStyle = "rgba(49, 95, 114, 0.12)";
@@ -7673,15 +8364,32 @@ class Game {
       const asset = this.figmaUiAssets && this.figmaUiAssets[type];
       this.drawImageAssetContain(ctx, asset, centerX - 28, y + 138, 56, 44);
       ctx.fillStyle = POWER_UPS[type].color;
-      ctx.font = "900 15px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "900 15px Arial, Helvetica, sans-serif");
       ctx.fillText(POWER_UPS[type].label, centerX, y + 192);
       ctx.fillStyle = "#657a82";
-      ctx.font = "bold 12px Arial, Helvetica, sans-serif";
+      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
       const desc = type === "magnifier" ? "判定范围扩大 10 秒"
         : type === "magnet" ? "自动吸附5秒"
         : "3秒爆发无敌";
       ctx.fillText(desc, centerX, y + 214);
     }
+
+    ctx.fillStyle = "#ff6b8e";
+    ctx.beginPath();
+    ctx.arc(closeRect.x + closeRect.w / 2, closeRect.y + closeRect.h / 2, closeRect.w / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(closeRect.x + 13, closeRect.y + 13);
+    ctx.lineTo(closeRect.x + 29, closeRect.y + 29);
+    ctx.moveTo(closeRect.x + 29, closeRect.y + 13);
+    ctx.lineTo(closeRect.x + 13, closeRect.y + 29);
+    ctx.stroke();
     ctx.restore();
   }
   drawGameOver(ctx) {
@@ -7710,7 +8418,7 @@ class Game {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#4bb7ef";
-    ctx.font = '900 38px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '900 38px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
     ctx.lineWidth = 9;
     ctx.lineJoin = "round";
     ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
@@ -7725,10 +8433,10 @@ class Game {
     this.roundRect(ctx, scoreX, scoreY, scoreW, scoreH, 18);
     ctx.fill();
     ctx.fillStyle = "#778494";
-    ctx.font = '800 13px "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '800 13px "PingFang SC", sans-serif');
     ctx.fillText("本轮得分", CONFIG.logicalWidth / 2, scoreY + 23);
     ctx.fillStyle = "#168fc8";
-    ctx.font = '900 42px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '900 42px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
     ctx.fillText(`${this.score} 分`, CONFIG.logicalWidth / 2, scoreY + 67);
 
     const statW = 126;
@@ -7746,10 +8454,10 @@ class Game {
       this.roundRect(ctx, statX, statsY, statW, statH, 14);
       ctx.fill();
       ctx.fillStyle = "#778494";
-      ctx.font = '700 12px "PingFang SC", sans-serif';
+      setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
       ctx.fillText(stat.label, statX + statW / 2, statsY + 19);
       ctx.fillStyle = stat.color;
-      ctx.font = '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif';
+      setCanvasFont(ctx, '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
       ctx.fillText(stat.value, statX + statW / 2, statsY + 44);
     });
 
@@ -7758,17 +8466,17 @@ class Game {
     this.roundRect(ctx, x + 29, reasonY, w - 58, 48, 15);
     ctx.fill();
     ctx.fillStyle = "#9b6674";
-    ctx.font = '700 12px "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
     ctx.fillText("掉落原因", CONFIG.logicalWidth / 2, reasonY + 14);
     ctx.fillStyle = this.failureReason === "力量过大" ? "#ff5f8c" : "#315f72";
-    ctx.font = '900 17px "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '900 17px "PingFang SC", sans-serif');
     ctx.fillText(this.failureReason || "挑战结束", CONFIG.logicalWidth / 2, reasonY + 34);
 
     ctx.fillStyle = "#315f72";
-    ctx.font = '800 15px "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '800 15px "PingFang SC", sans-serif');
     ctx.fillText("点击屏幕查看排行榜", CONFIG.logicalWidth / 2, y + 316);
     ctx.fillStyle = "rgba(49, 95, 114, 0.50)";
-    ctx.font = '700 11px "PingFang SC", sans-serif';
+    setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
     ctx.fillText("看看你的最高纪录与上一名还有多远", CONFIG.logicalWidth / 2, y + 337);
     ctx.restore();
   }
@@ -7799,7 +8507,7 @@ class Game {
       `route/support: ${this.routeHolds.length} / ${this.generator.supportHolds.length}`,
       `cameraY: ${this.camera.y.toFixed(1)}`
     ];
-    ctx.font = "10px Arial";
+    setCanvasFont(ctx, "12px Arial");
     ctx.textBaseline = "top";
     ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
     ctx.fillRect(10, 104, 182, lines.length * 13 + 8);
