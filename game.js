@@ -3555,6 +3555,10 @@ class Game {
     if (id === "outfit-close") {
       this.uiPanel = null;
     }
+    if (id === "open-news-app") {
+      this.triggerAppLaunchForRanking();
+      return true;
+    }
   }
 
   startTutorialGame() {
@@ -7252,11 +7256,30 @@ class Game {
           this.showToast("游客可查看榜单，但本机成绩不参与排名");
         }
       }
+    } else {
+      // 端外：提示打开腾讯新闻并拉端
+      this.remoteLeaderboard = {
+        status: "needApp",
+        entries: [],
+        own: null,
+        error: "登录腾讯新闻，查看完整排行榜"
+      };
+      this.triggerAppLaunchForRanking();
+      return;
     }
     const bestRecord = this.scoreManager.best;
     const bestScore = Math.max(0, Math.floor(Number(bestRecord.score) || 0));
     const shouldInitializeRanking = Boolean(this.loggedInUser && bestScore > 0);
     await this.loadRemoteLeaderboard(shouldInitializeRanking, bestRecord);
+  }
+
+  triggerAppLaunchForRanking() {
+    if (globalThis.qqNewsAppLaunch && typeof globalThis.qqNewsAppLaunch.tryOpenApp === "function") {
+      globalThis.qqNewsAppLaunch.tryOpenApp({
+        srcFrom: "panlegeyan_27be",
+        hrefUrl: globalThis.location.href.split("#")[0]
+      });
+    }
   }
 
   async loadRemoteLeaderboard(submitCurrentScore, recordOverride = null) {
@@ -7634,6 +7657,30 @@ class Game {
       ctx.textAlign = "center";
       ctx.fillText(data.error || "正在加载正式排行榜…", CONFIG.logicalWidth / 2, panelY + 150);
       ctx.restore();
+    } else if (data.status === "needApp") {
+      ctx.save();
+      ctx.fillStyle = "#55727e";
+      setCanvasFont(ctx, '800 16px "PingFang SC", sans-serif');
+      ctx.textAlign = "center";
+      ctx.fillText(data.error || "登录腾讯新闻，查看完整排行榜", CONFIG.logicalWidth / 2, panelY + 150);
+      ctx.restore();
+      const btnW = 260;
+      const btnH = 48;
+      const btnX = (CONFIG.logicalWidth - btnW) / 2;
+      const btnY = panelY + 188;
+      ctx.save();
+      ctx.fillStyle = "#2197d3";
+      this.roundRect(ctx, btnX, btnY, btnW, btnH, 24);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.textBaseline = "middle";
+      setCanvasFont(ctx, '800 15px "PingFang SC", sans-serif');
+      ctx.textAlign = "center";
+      ctx.fillText("登录腾讯新闻，挑战排行榜", CONFIG.logicalWidth / 2, btnY + btnH / 2);
+      ctx.restore();
+      if (!fromGameOver) {
+        this.uiPanel.buttons = [{ id: "open-news-app", x: btnX, y: btnY, w: btnW, h: btnH }];
+      }
     } else if (data.rows.length === 0) {
       ctx.save();
       ctx.fillStyle = "#55727e";
