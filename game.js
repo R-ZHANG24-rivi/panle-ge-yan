@@ -192,6 +192,20 @@ const ACCURACY_TIERS = {
   }
 };
 
+const GRAB_HAPTIC_INTENSITIES = Object.freeze({
+  risky: 0.3,
+  good: 0.4,
+  precise: 0.5,
+  combo: 0.5,
+  powerUp: 0.6
+});
+
+function getGrabHapticIntensity(tierName, comboCount = 0, grabbedPowerUp = false) {
+  if (grabbedPowerUp) return GRAB_HAPTIC_INTENSITIES.powerUp;
+  if (comboCount > 1) return GRAB_HAPTIC_INTENSITIES.combo;
+  return GRAB_HAPTIC_INTENSITIES[tierName] || GRAB_HAPTIC_INTENSITIES.risky;
+}
+
 const THEME = {
   wall: {
     base: "#eaf8fc",
@@ -247,100 +261,122 @@ const THEME = {
 
 const HOLD_SHAPES = ["jug", "blob", "triangle", "sloper", "pinch", "smallCrimp", "volume"];
 
+function detectGameAssetBaseUrl() {
+  const scriptElement = document.currentScript
+    || Array.from(document.scripts).find((script) => /\/game(?:\.[a-f0-9]+)?\.js(?:\?|$)/i.test(script.src));
+  const scriptUrl = scriptElement && scriptElement.src
+    ? scriptElement.src
+    : new URL("game.js", window.location.href).href;
+  return new URL("assets/", scriptUrl).href;
+}
+
+const GAME_ASSET_BASE_URL = detectGameAssetBaseUrl();
+
+function gameAssetUrl(relativePath) {
+  return new URL(relativePath.replace(/^\/+/, ""), GAME_ASSET_BASE_URL).href;
+}
+
+function resolveGameAssetMap(files) {
+  return Object.fromEntries(
+    Object.entries(files).map(([key, relativePath]) => [key, gameAssetUrl(relativePath)])
+  );
+}
+
 const HOLD_THEME_ASSET_SETS = [
-  { id: "theme01", basePath: "assets/hold_themes/theme01", manifestFile: "assets/hold_themes/theme01/theme01_holds_manifest.json" },
-  { id: "theme02", basePath: "assets/hold_themes/theme02", manifestFile: "assets/hold_themes/theme02/theme02_holds_manifest.json" },
-  { id: "theme03", basePath: "assets/hold_themes/theme03", manifestFile: "assets/hold_themes/theme03/theme03_holds_manifest.json" },
-  { id: "theme04", basePath: "assets/hold_themes/theme04", manifestFile: "assets/hold_themes/theme04/theme04_holds_manifest.json" },
-  { id: "theme05", basePath: "assets/hold_themes/theme05", manifestFile: "assets/hold_themes/theme05/theme05_holds_manifest.json" },
-  { id: "theme06", basePath: "assets/hold_themes/theme06", manifestFile: "assets/hold_themes/theme06/theme06_holds_manifest.json" }
+  { id: "theme01", basePath: gameAssetUrl("hold_themes/theme01"), manifestFile: gameAssetUrl("hold_themes/theme01/theme01_holds_manifest.json") },
+  { id: "theme02", basePath: gameAssetUrl("hold_themes/theme02"), manifestFile: gameAssetUrl("hold_themes/theme02/theme02_holds_manifest.json") },
+  { id: "theme03", basePath: gameAssetUrl("hold_themes/theme03"), manifestFile: gameAssetUrl("hold_themes/theme03/theme03_holds_manifest.json") },
+  { id: "theme04", basePath: gameAssetUrl("hold_themes/theme04"), manifestFile: gameAssetUrl("hold_themes/theme04/theme04_holds_manifest.json") },
+  { id: "theme05", basePath: gameAssetUrl("hold_themes/theme05"), manifestFile: gameAssetUrl("hold_themes/theme05/theme05_holds_manifest.json") },
+  { id: "theme06", basePath: gameAssetUrl("hold_themes/theme06"), manifestFile: gameAssetUrl("hold_themes/theme06/theme06_holds_manifest.json") }
 ];
-const PLAYER_ASSET_FILES = {
-  fallingPose: "assets/player/falling_pose.png",
-  climbingPose: "assets/player/climbing_pose.png",
-  headFront: "assets/player/head_front.png",
-  headFrontHappy: "assets/player/head_front_happy.png?v=20260717-figma-0.75",
-  headBack: "assets/player/head_back.png",
-  hair02Front: "assets/player/outfit/hair_02_front.png",
-  hair02Back: "assets/player/outfit/hair_02_back.png",
-  hairFemaleFront: "assets/player/outfit/hair_female_front.png",
-  hairFemaleBack: "assets/player/outfit/hair_female_back.png",
-  hairMaleFront: "assets/player/outfit/hair_male_front.png",
-  hairMaleBack: "assets/player/outfit/hair_male_back.png",
-  headMaleFront: "assets/player/outfit/head_male_back.png",
-  headMaleFrontHappy: "assets/player/outfit/head_male_front_happy.png?v=20260717-figma-0.75",
-  glasses01: "assets/player/outfit/glasses_01.png",
-  shirt: "assets/player/shirt.png?v=20260708-rounded",
-  shirtFemale: "assets/player/outfit/shirt_female.png",
-  shirtMale: "assets/player/outfit/shirt_male.png",
-  pantsBlue: "assets/player/outfit/pants_blue.png",
-  pantsBrown: "assets/player/outfit/pants_brown.png",
-  shorts: "assets/player/shorts.png",
-  leftUpperArm: "assets/player/left_upper_arm.png",
-  leftLowerArm: "assets/player/left_lower_arm.png",
-  rightUpperArm: "assets/player/right_upper_arm.png",
-  rightLowerArm: "assets/player/right_lower_arm.png",
-  leftHand: "assets/player/left_hand.png",
-  rightHand: "assets/player/right_hand.png",
-  leftThigh: "assets/player/left_thigh.png",
-  leftShin: "assets/player/left_shin.png",
-  rightThigh: "assets/player/right_thigh.png",
-  rightShin: "assets/player/right_shin.png",
-  hips: "assets/player/hips.png",
-  belt: "assets/player/belt.png",
-  chalkBagSprite: "assets/player/chalk_bag.png",
-  chalkBag01: "assets/player/outfit/chalk_bag_01.png",
-  chalkBag02: "assets/player/outfit/chalk_bag_02.png",
-  leftFoot: "assets/player/left_foot.png",
-  rightFoot: "assets/player/right_foot.png"
-};
+const PLAYER_ASSET_FILES = resolveGameAssetMap({
+  fallingPose: "player/falling_pose.png",
+  climbingPose: "player/climbing_pose.png",
+  headFront: "player/head_front.png",
+  headFrontHappy: "player/head_front_happy.png?v=20260717-figma-0.75",
+  headBack: "player/head_back.png",
+  hair02Front: "player/outfit/hair_02_front.png",
+  hair02Back: "player/outfit/hair_02_back.png",
+  hairFemaleFront: "player/outfit/hair_female_front.png",
+  hairFemaleBack: "player/outfit/hair_female_back.png",
+  hairMaleFront: "player/outfit/hair_male_front.png",
+  hairMaleBack: "player/outfit/hair_male_back.png",
+  headMaleFront: "player/outfit/head_male_back.png",
+  headMaleFrontHappy: "player/outfit/head_male_front_happy.png?v=20260717-figma-0.75",
+  glasses01: "player/outfit/glasses_01.png",
+  shirt: "player/shirt.png?v=20260708-rounded",
+  shirtFemale: "player/outfit/shirt_female.png",
+  shirtMale: "player/outfit/shirt_male.png",
+  pantsBlue: "player/outfit/pants_blue.png",
+  pantsBrown: "player/outfit/pants_brown.png",
+  shorts: "player/shorts.png",
+  leftUpperArm: "player/left_upper_arm.png",
+  leftLowerArm: "player/left_lower_arm.png",
+  rightUpperArm: "player/right_upper_arm.png",
+  rightLowerArm: "player/right_lower_arm.png",
+  leftHand: "player/left_hand.png",
+  rightHand: "player/right_hand.png",
+  leftThigh: "player/left_thigh.png",
+  leftShin: "player/left_shin.png",
+  rightThigh: "player/right_thigh.png",
+  rightShin: "player/right_shin.png",
+  hips: "player/hips.png",
+  belt: "player/belt.png",
+  chalkBagSprite: "player/chalk_bag.png",
+  chalkBag01: "player/outfit/chalk_bag_01.png",
+  chalkBag02: "player/outfit/chalk_bag_02.png",
+  leftFoot: "player/left_foot.png",
+  rightFoot: "player/right_foot.png"
+});
 
-const UI_ICON_FILES = {
-  back: "assets/ui/icon_back.png",
-  skin: "assets/ui/icon_skin.png?v=20260710-shirt-1",
-  restart: "assets/ui/icon_restart.png",
-  rank: "assets/ui/icon_rank.png",
-  soundOn: "assets/ui/icon_sound_on.png",
-  soundOff: "assets/ui/icon_sound_off.png",
-  share: "assets/ui/icon_share.png",
-  rocket: "assets/ui/icon_rocket.png"
-};
+const UI_ICON_FILES = resolveGameAssetMap({
+  back: "ui/icon_back.png",
+  tutorial: "ui/icon_help.png?v=20260721-help-icon-1",
+  skin: "ui/icon_skin.png?v=20260710-shirt-1",
+  restart: "ui/icon_restart.png",
+  rank: "ui/icon_rank.png",
+  soundOn: "ui/icon_sound_on.png",
+  soundOff: "ui/icon_sound_off.png",
+  share: "ui/icon_share.png",
+  rocket: "ui/icon_rocket.png"
+});
 
-const FIGMA_UI_ASSET_FILES = {
-  coverTitle: "assets/ui/figma/cover_title.png?v=20260712-figma-cover-1",
-  startButton: "assets/ui/figma/btn_start.png?v=20260712-figma-cover-1",
-  outfitButton: "assets/ui/figma/btn_outfit.png?v=20260712-figma-cover-1",
-  rankButton: "assets/ui/figma/btn_rank.png?v=20260712-figma-cover-1",
-  rankingTitle: "assets/ui/figma/ranking_title.png?v=20260717-figma-title-1",
-  magnet: "assets/ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
-  magnifier: "assets/ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1",
-  rocket: "assets/ui/icon_rocket.png",
-  tutorialHand: "assets/ui/tutorial_hand.png?v=20260717-tutorial-hand"
-};
-const FEEDBACK_ASSET_FILES = {
-  good: "assets/ui/feedback/feedback_good.png?v=20260710-feedback-2",
-  risky: "assets/ui/feedback/feedback_risky.png?v=20260710-feedback-2",
-  precise: "assets/ui/feedback/feedback_precise.png?v=20260710-feedback-2",
-  combo2: "assets/ui/feedback/combo_2.png?v=20260710-feedback-2",
-  combo3: "assets/ui/feedback/combo_3.png?v=20260710-feedback-2",
-  combo4: "assets/ui/feedback/combo_4.png?v=20260710-feedback-2",
-  combo5: "assets/ui/feedback/combo_5.png?v=20260710-feedback-2",
-  combo6: "assets/ui/feedback/combo_6.png?v=20260710-feedback-2",
-  combo7: "assets/ui/feedback/combo_7.png?v=20260710-feedback-2",
-  combo8: "assets/ui/feedback/combo_8.png?v=20260710-feedback-2",
-  combo9: "assets/ui/feedback/combo_9.png?v=20260710-feedback-2",
-  combo10: "assets/ui/feedback/combo_10.png?v=20260710-feedback-2",
-  combo11: "assets/ui/feedback/combo_11.png?v=20260713-combo11-20",
-  combo12: "assets/ui/feedback/combo_12.png?v=20260713-combo11-20",
-  combo13: "assets/ui/feedback/combo_13.png?v=20260713-combo11-20",
-  combo14: "assets/ui/feedback/combo_14.png?v=20260713-combo11-20",
-  combo15: "assets/ui/feedback/combo_15.png?v=20260713-combo11-20",
-  combo16: "assets/ui/feedback/combo_16.png?v=20260713-combo11-20",
-  combo17: "assets/ui/feedback/combo_17.png?v=20260713-combo11-20",
-  combo18: "assets/ui/feedback/combo_18.png?v=20260713-combo11-20",
-  combo19: "assets/ui/feedback/combo_19.png?v=20260713-combo11-20",
-  combo20: "assets/ui/feedback/combo_20.png?v=20260713-combo11-20"
-};
+const FIGMA_UI_ASSET_FILES = resolveGameAssetMap({
+  coverTitle: "ui/figma/cover_title.png?v=20260712-figma-cover-1",
+  startButton: "ui/figma/btn_start_base.png?v=20260721-code-labels-1",
+  outfitButton: "ui/figma/btn_outfit_icon.png?v=20260721-code-labels-1",
+  rankButton: "ui/figma/btn_rank_icon.png?v=20260721-code-labels-1",
+  rankingTitle: "ui/figma/ranking_title.png?v=20260717-figma-title-1",
+  magnet: "ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
+  magnifier: "ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1",
+  rocket: "ui/icon_rocket.png",
+  tutorialHand: "ui/tutorial_hand.png?v=20260717-tutorial-hand"
+});
+const FEEDBACK_ASSET_FILES = resolveGameAssetMap({
+  good: "ui/feedback/feedback_good.png?v=20260710-feedback-2",
+  risky: "ui/feedback/feedback_risky.png?v=20260710-feedback-2",
+  precise: "ui/feedback/feedback_precise.png?v=20260710-feedback-2",
+  combo2: "ui/feedback/combo_2.png?v=20260710-feedback-2",
+  combo3: "ui/feedback/combo_3.png?v=20260710-feedback-2",
+  combo4: "ui/feedback/combo_4.png?v=20260710-feedback-2",
+  combo5: "ui/feedback/combo_5.png?v=20260710-feedback-2",
+  combo6: "ui/feedback/combo_6.png?v=20260710-feedback-2",
+  combo7: "ui/feedback/combo_7.png?v=20260710-feedback-2",
+  combo8: "ui/feedback/combo_8.png?v=20260710-feedback-2",
+  combo9: "ui/feedback/combo_9.png?v=20260710-feedback-2",
+  combo10: "ui/feedback/combo_10.png?v=20260710-feedback-2",
+  combo11: "ui/feedback/combo_11.png?v=20260713-combo11-20",
+  combo12: "ui/feedback/combo_12.png?v=20260713-combo11-20",
+  combo13: "ui/feedback/combo_13.png?v=20260713-combo11-20",
+  combo14: "ui/feedback/combo_14.png?v=20260713-combo11-20",
+  combo15: "ui/feedback/combo_15.png?v=20260713-combo11-20",
+  combo16: "ui/feedback/combo_16.png?v=20260713-combo11-20",
+  combo17: "ui/feedback/combo_17.png?v=20260713-combo11-20",
+  combo18: "ui/feedback/combo_18.png?v=20260713-combo11-20",
+  combo19: "ui/feedback/combo_19.png?v=20260713-combo11-20",
+  combo20: "ui/feedback/combo_20.png?v=20260713-combo11-20"
+});
 
 const AUDIO_FILES = {
   bgm: "assets/audio/bgm_main.mp3?v=20260717-under-100kb",
@@ -786,20 +822,28 @@ class ScoreManager {
   }
 
   saveBestScore(score) {
-    const scoreImproved = (score.score || 0) > (this.best.score || 0);
-    const nextBest = {
-      holds: Math.max(this.best.holds, score.holds),
-      height: Math.max(this.best.height, score.height),
-      score: Math.max(this.best.score || 0, score.score || 0),
-      duration: scoreImproved || !this.best.duration
-        ? (Number(score.duration) || 0)
-        : this.best.duration
-    };
-    const changed = nextBest.holds !== this.best.holds
-      || nextBest.height !== this.best.height
-      || nextBest.score !== this.best.score;
+    const incoming = this.normalizeRecord(score);
+    const currentScore = Number(this.best.score) || 0;
+    const currentHeight = Number(this.best.height) || 0;
+    const currentDuration = Number(this.best.duration) || 0;
+    const scoreImproved = incoming.score > currentScore;
+    const equalScoreImproved = incoming.score === currentScore && (
+      incoming.height > currentHeight
+      || incoming.height === currentHeight
+        && incoming.duration > 0
+        && (!currentDuration || incoming.duration < currentDuration)
+    );
+    const changed = scoreImproved || equalScoreImproved || currentScore <= 0;
+    const nextBest = changed
+      ? {
+          holds: incoming.holds,
+          height: incoming.height,
+          score: incoming.score,
+          duration: incoming.duration
+        }
+      : this.best;
     this.best = nextBest;
-    this.pushRanking(score);
+    this.pushRanking(incoming);
     try {
       window.localStorage.setItem(this.storageKey, JSON.stringify(this.best));
       window.localStorage.setItem(this.rankingsKey, JSON.stringify(this.rankings));
@@ -1131,6 +1175,9 @@ class PlayerAssetManager {
     this.assets = {};
     for (const [name, src] of Object.entries(files)) {
       const image = new Image();
+      if (/^https?:\/\//i.test(src)) {
+        image.crossOrigin = "anonymous";
+      }
       const asset = {
         src,
         image,
@@ -2491,7 +2538,7 @@ class AudioManager {
     return this.startLoopSfx("charge", {
       mode: direction < 0 ? "reverse" : "forward",
       playbackRate: 1,
-      volume: 0.665
+      volume: 2
     });
   }
   stopCharge() {
@@ -2500,7 +2547,7 @@ class AudioManager {
   playMiss() {
     this.playSfx("miss", {
       playbackRate: 1,
-      volume: 0.9
+      volume: Math.min(1.2, 0.9 * 1.2)
     });
   }
 
@@ -2595,6 +2642,10 @@ class Game {
     this.generator = new HoldGenerator(this.holdAssets);
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
     this.outfitAssetCache = new Map();
+    this.outfitOptionPreviewCache = new Map();
+    this.outfitBackdrop = null;
+    this.outfitPreviewTime = 0;
+    this.lastOutfitRenderTime = 0;
     this.uiIconAssets = this.loadUiIconAssets();
     this.feedbackAssets = this.loadFeedbackAssets();
     this.figmaUiAssets = this.loadFigmaUiAssets();
@@ -2888,6 +2939,7 @@ class Game {
       this.loadingProgress = 1;
       this.loading = false;
       this.loadingMessage = "加载完成";
+      this.scheduleOutfitOptionPreviewCache();
       this.enterStartScreen();
       this.lastTime = performance.now();
     });
@@ -3197,10 +3249,15 @@ class Game {
   }
   loop(time) {
     if (!this.backgroundPaused) {
-      const deltaTime = Math.min((time - this.lastTime) / 1000, 0.05);
-      this.lastTime = time;
-      this.update(deltaTime);
-      this.draw();
+      const outfitOpen = this.uiPanel && this.uiPanel.type === "outfit";
+      const shouldRender = !outfitOpen || time - this.lastOutfitRenderTime >= 1000 / 30;
+      if (shouldRender) {
+        const deltaTime = Math.min((time - this.lastTime) / 1000, 0.05);
+        this.lastTime = time;
+        this.lastOutfitRenderTime = outfitOpen ? time : 0;
+        this.update(deltaTime);
+        this.draw();
+      }
     }
     requestAnimationFrame((nextTime) => this.loop(nextTime));
   }
@@ -3223,6 +3280,10 @@ class Game {
     }
     if (this.tutorialCompleteTime > 0 && !this.tutorialCompleteAwaitingDismiss) {
       this.tutorialCompleteTime = Math.max(0, this.tutorialCompleteTime - deltaTime);
+    }
+    if (this.uiPanel && this.uiPanel.type === "outfit") {
+      this.outfitPreviewTime += deltaTime;
+      return;
     }
     this.updatePowerUps(deltaTime);
 
@@ -3527,6 +3588,9 @@ class Game {
     }
     if (id === "skin" || id === "shop") {
       this.selectedOutfitPart = "hair";
+      this.captureOutfitBackdrop();
+      this.outfitPreviewTime = 0;
+      this.lastOutfitRenderTime = 0;
       this.uiPanel = { type: "outfit" };
       return;
     }
@@ -3554,6 +3618,8 @@ class Game {
     }
     if (id === "outfit-close") {
       this.uiPanel = null;
+      this.outfitBackdrop = null;
+      this.lastOutfitRenderTime = 0;
     }
     if (id === "open-news-app") {
       this.triggerAppLaunchForRanking();
@@ -3638,9 +3704,7 @@ class Game {
         this.chargeDirection = 0;
         this.tutorialPhase = "release";
         this.audio.stopCharge();
-        if (navigator.vibrate) {
-          navigator.vibrate(24);
-        }
+        if (window.qqNewsHaptics) window.qqNewsHaptics.vibrate(0.3);
       }
       return;
     }
@@ -3898,6 +3962,14 @@ class Game {
     // 爬到岩点：腾讯新闻端内震动反馈（强度 0.5），详见 qqnews-utils.js
     if (window.qqNewsHaptics) window.qqNewsHaptics.vibrate(0.5);
     const grabbedPowerUp = this.targetHold.powerUp;
+    // 同一次抓点只震动一次：道具 0.6 > 连击/精准 0.5 > 不错 0.4 > 惊险 0.3。
+    if (window.qqNewsHaptics) {
+      window.qqNewsHaptics.vibrate(getGrabHapticIntensity(
+        this.feedback.tier,
+        this.feedback.combo,
+        grabbedPowerUp
+      ));
+    }
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
     this.targetHold.powerUp = null;
@@ -4098,8 +4170,10 @@ class Game {
     this.holdCount += 1;
     this.climbHeight = this.calculateClimbHeightFromCurrentHold();
     this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
-    // 火箭自动攀爬爬到岩点：腾讯新闻端内震动反馈（强度 0.5），详见 qqnews-utils.js
-    if (window.qqNewsHaptics) window.qqNewsHaptics.vibrate(0.5);
+    // 火箭自动攀爬没有精准度评级，普通抓点按 0.3，道具仍优先按 0.6。
+    if (window.qqNewsHaptics) {
+      window.qqNewsHaptics.vibrate(getGrabHapticIntensity("risky", 0, grabbedPowerUp));
+    }
     if (grabbedPowerUp) {
       this.activatePowerUp(grabbedPowerUp);
     }
@@ -4717,6 +4791,24 @@ class Game {
     ctx.clearRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
     if (this.loading || this.state === STATE.LOADING) {
       this.drawLoadingScreen(ctx);
+      return;
+    }
+    if (this.uiPanel && this.uiPanel.type === "outfit" && this.outfitBackdrop) {
+      ctx.drawImage(
+        this.outfitBackdrop,
+        0,
+        0,
+        this.outfitBackdrop.width,
+        this.outfitBackdrop.height,
+        0,
+        0,
+        CONFIG.logicalWidth,
+        CONFIG.logicalHeight
+      );
+      this.drawUiPanel(ctx);
+      if (this.uiToast) {
+        this.drawToast(ctx);
+      }
       return;
     }
     this.drawWall(ctx);
@@ -5799,8 +5891,15 @@ class Game {
     canvas.width = image.naturalWidth || image.width;
     canvas.height = image.naturalHeight || image.height;
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(image, 0, 0);
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let pixels;
+    try {
+      ctx.drawImage(image, 0, 0);
+      pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    } catch (error) {
+      console.warn("[Outfit] Brown pants recolor unavailable", error);
+      this.outfitAssetCache.set(cacheKey, image);
+      return image;
+    }
     const data = pixels.data;
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
@@ -7174,16 +7273,42 @@ class Game {
   drawFigmaStartButton(ctx, id, assetName, x, y, w, h) {
     this.menuButtons.push({ id, x, y, w, h });
     const asset = this.figmaUiAssets && this.figmaUiAssets[assetName];
-    if (this.drawImageAssetContain(ctx, asset, x - 18, y - 18, w + 36, h + 36)) {
-      return;
+    if (id === "play") {
+      const pulse = 0.5 + Math.sin(performance.now() * 0.0032) * 0.5;
+      const spread = 3 + pulse * 4;
+      ctx.save();
+      ctx.shadowColor = `rgba(91, 211, 244, ${0.42 + pulse * 0.24})`;
+      ctx.shadowBlur = 14 + pulse * 16;
+      ctx.fillStyle = `rgba(137, 220, 246, ${0.12 + pulse * 0.08})`;
+      this.roundRect(ctx, x - spread, y - spread, w + spread * 2, h + spread * 2, h / 2 + spread);
+      ctx.fill();
+      ctx.restore();
     }
+    const backgroundDrawn = this.drawImageAssetContain(ctx, asset, x, y, w, h);
+    if (!backgroundDrawn) {
+      ctx.save();
+      ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 6;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+      this.roundRect(ctx, x, y, w, h, h / 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const labels = {
+      play: { text: "开始游戏", fontSize: 22, centerX: x + w / 2 },
+      shop: { text: "换装", fontSize: 16, centerX: x + 66 },
+      rank: { text: "排行榜", fontSize: 16, centerX: x + 67 }
+    };
+    const label = labels[id];
+    if (!label) return;
     ctx.save();
-    ctx.shadowColor = "rgba(73, 116, 133, 0.18)";
-    ctx.shadowBlur = 12;
-    ctx.shadowOffsetY = 6;
-    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    this.roundRect(ctx, x, y, w, h, h / 2);
-    ctx.fill();
+    ctx.fillStyle = "#0876bd";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setCanvasFont(ctx, `900 ${label.fontSize}px "PingFang SC", "Microsoft YaHei", Arial, Helvetica, sans-serif`);
+    ctx.fillText(label.text, label.centerX, y + h / 2 + 1);
     ctx.restore();
   }
 
@@ -7747,6 +7872,29 @@ class Game {
     ctx.restore();
   }
 
+  captureOutfitBackdrop() {
+    const backdrop = document.createElement("canvas");
+    backdrop.width = CONFIG.logicalWidth;
+    backdrop.height = CONFIG.logicalHeight;
+    const backdropContext = backdrop.getContext("2d");
+    if (!backdropContext) {
+      this.outfitBackdrop = null;
+      return;
+    }
+    backdropContext.drawImage(
+      this.canvas,
+      0,
+      0,
+      this.canvas.width,
+      this.canvas.height,
+      0,
+      0,
+      CONFIG.logicalWidth,
+      CONFIG.logicalHeight
+    );
+    this.outfitBackdrop = backdrop;
+  }
+
   drawOutfitPanel(ctx) {
     const x = 31;
     const y = 158;
@@ -7920,7 +8068,7 @@ class Game {
     this.player.worldY = cy;
     this.player.bodyAngle = 0;
     this.player.frontFacingAmount = isFront ? 1 : 0;
-    this.player.animTime = previous.animTime || 0;
+    this.player.animTime = this.outfitPreviewTime || 0;
 
     // 试衣间：正常直立姿势 + 轻微待机动作（呼吸起伏、手臂微摆、身体轻晃、头部微动）
     const t = this.player.animTime || 0;
@@ -8096,7 +8244,55 @@ class Game {
     ctx.restore();
   }
 
+  scheduleOutfitOptionPreviewCache() {
+    const build = () => this.buildOutfitOptionPreviewCache();
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(build, { timeout: 1200 });
+    } else {
+      window.setTimeout(build, 0);
+    }
+  }
+
+  buildOutfitOptionPreviewCache() {
+    const optionIds = [
+      "hair_female",
+      "hair_male",
+      "shirt_01",
+      "shirt_male",
+      "pants_blue",
+      "pants_brown",
+      "chalk_01",
+      "chalk_02",
+      "none",
+      "glasses_01"
+    ];
+    const logicalSize = 52;
+    const renderScale = Math.max(1, Math.min(this.canvas.width / CONFIG.logicalWidth, 3));
+    this.outfitOptionPreviewCache.clear();
+    optionIds.forEach((optionId) => {
+      const preview = document.createElement("canvas");
+      preview.width = Math.ceil(logicalSize * renderScale);
+      preview.height = Math.ceil(logicalSize * renderScale);
+      const previewContext = preview.getContext("2d");
+      if (!previewContext) {
+        return;
+      }
+      previewContext.setTransform(renderScale, 0, 0, renderScale, 0, 0);
+      this.drawOutfitOptionPreviewContent(previewContext, optionId, logicalSize / 2, logicalSize / 2);
+      this.outfitOptionPreviewCache.set(optionId, preview);
+    });
+  }
+
   drawOutfitOptionPreview(ctx, optionId, cx, cy) {
+    const cachedPreview = this.outfitOptionPreviewCache.get(optionId);
+    if (cachedPreview) {
+      ctx.drawImage(cachedPreview, cx - 26, cy - 26, 52, 52);
+      return;
+    }
+    this.drawOutfitOptionPreviewContent(ctx, optionId, cx, cy);
+  }
+
+  drawOutfitOptionPreviewContent(ctx, optionId, cx, cy) {
     ctx.save();
     ctx.translate(cx, cy);
     const sprite = this.getOutfitOptionPreviewAsset(optionId);
