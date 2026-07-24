@@ -351,7 +351,10 @@ const FIGMA_UI_ASSET_FILES = resolveGameAssetMap({
   magnet: "ui/figma/powerup_magnet.png?v=20260712-figma-cover-1",
   magnifier: "ui/figma/powerup_magnifier.png?v=20260712-figma-cover-1",
   rocket: "ui/icon_rocket.png",
-  tutorialHand: "ui/tutorial_hand.png?v=20260717-tutorial-hand"
+  tutorialHand: "ui/tutorial_hand.png?v=20260717-tutorial-hand",
+  resultReviveButton: "ui/figma/result-revive-button.png?v=20260723-result-modal-1",
+  resultQuitButton: "ui/figma/result-quit-button.png?v=20260723-result-modal-1",
+  resultQuitButtonWide: "ui/figma/result-quit-button-wide.png?v=20260723-result-modal-1"
 });
 const FEEDBACK_ASSET_FILES = resolveGameAssetMap({
   good: "ui/feedback/feedback_good.png?v=20260710-feedback-2",
@@ -383,7 +386,8 @@ const AUDIO_FILES = {
   grabSuccess: "assets/audio/sfx_grab_success.mp3?v=20260716-optimized-1",
   charge: "assets/audio/sfx_charge.mp3?v=20260716-optimized-1",
   powerUp: "assets/audio/sfx_power_up.mp3?v=20260716-optimized-1",
-  miss: "assets/audio/sfx_miss.mp3?v=20260716-optimized-1"
+  miss: "assets/audio/sfx_miss.mp3?v=20260716-optimized-1",
+  click: "assets/audio/sfx_click.mp3?v=20260722-click-icon"
 };
 
 const DEFAULT_OUTFIT = {
@@ -2223,7 +2227,7 @@ class InputController {
     if (this.inputTarget.setPointerCapture) {
       this.inputTarget.setPointerCapture(event.pointerId);
     }
-    this.game.handlePressStart();
+    this.game.handlePressStart(point);
   }
 
   onPointerMove(event) {
@@ -2302,7 +2306,8 @@ class AudioManager {
       grabSuccess: files.grabSuccess,
       charge: files.charge,
       powerUp: files.powerUp,
-      miss: files.miss
+      miss: files.miss,
+      click: files.click
     };
     this.grabRankSettings = {
       lucky: { playbackRate: 0.84, volume: 0.75 },
@@ -2347,7 +2352,8 @@ class AudioManager {
       this.preloadSfx("grabSuccess"),
       this.preloadSfx("charge"),
       this.preloadSfx("powerUp"),
-      this.preloadSfx("miss")
+      this.preloadSfx("miss"),
+      this.preloadSfx("click")
     ]).then((results) => results.some(Boolean));
   }
 
@@ -2556,6 +2562,11 @@ class AudioManager {
       playbackRate: 1,
       volume: 0.85
     });
+  }
+
+  playClick() {
+    // 所有 UI 图标点击反馈音（开始游戏/换装/排行榜/返回/帮助/分享等）
+    this.playSfx("click", { playbackRate: 1, volume: 0.42 });
   }
 
   playGrabRank(rank, comboCount = 0) {
@@ -3010,6 +3021,12 @@ class Game {
     this.failureReason = "";
     this.roundEnded = false;
     this.newBest = false;
+    this.reviveUsed = false;
+    this.reviveAdLoading = false;
+    this.preFall = null;
+    this.reviveBaseline = null;
+    this.reviveButtonRect = null;
+    this.quitButtonRect = null;
     this.lastAttempt = null;
     this.animationResult = null;
     this.pendingAttempt = null;
@@ -3221,7 +3238,7 @@ class Game {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.climbHeight = Math.max(this.climbHeight, this.calculateClimbHeightFromCurrentHold());
     const neutral = this.player.getNeutralBodyForHold(this.currentHold);
     const feet = this.chooseFeetSupportsForBody("front", neutral);
     this.player.beginBodyFollow(this.currentHold, feet.leftFoot, feet.rightFoot);
@@ -3406,7 +3423,7 @@ class Game {
       }
     }
   }
-  handlePressStart() {
+  handlePressStart(point) {
     if (this.loading || this.state === STATE.LOADING) {
       return;
     }
@@ -3422,6 +3439,19 @@ class Game {
     }
     if (this.state === STATE.GAME_OVER || this.roundEnded) {
       if (this.gameOverStage === "summary") {
+        this.audio.playClick();
+        if (this.reviveButtonRect && this.pointInRect(point, this.reviveButtonRect)) {
+          void this.requestRevive();
+          return;
+        }
+        if (this.quitButtonRect && this.pointInRect(point, this.quitButtonRect)) {
+          this.gameOverStage = "ranking";
+          this.resetLeaderboardScroll();
+          void this.loadRemoteLeaderboard(true);
+          this.state = STATE.GAME_OVER;
+          return;
+        }
+        // 点击弹窗其它区域：进入排行榜（原默认行为）
         this.gameOverStage = "ranking";
         this.resetLeaderboardScroll();
         void this.loadRemoteLeaderboard(true);
@@ -3481,6 +3511,7 @@ class Game {
     this.audio.unlock();
     if (this.tutorialCompleteTime > 0) {
       if (this.tutorialCompleteCloseRect && this.pointInRect(point, this.tutorialCompleteCloseRect)) {
+        this.audio.playClick();
         reportQuwanEvent("tutorial_complete_close", { source: "close_button" });
         this.dismissTutorialComplete();
       }
@@ -3488,6 +3519,7 @@ class Game {
     }
     if (this.uiPanel) {
       if (this.uiPanel.closeRect && this.pointInRect(point, this.uiPanel.closeRect)) {
+        this.audio.playClick();
         this.uiPanel = null;
         return true;
       }
@@ -3535,6 +3567,7 @@ class Game {
   }
 
   activateUiButton(id) {
+    this.audio.playClick();
     reportQuwanEvent("ui_click", { button_id: `panlegeyan_${id}_btn`, state: this.state });
     if (id === "play") {
       void this.requestStartGame();
@@ -3981,7 +4014,7 @@ class Game {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.climbHeight = Math.max(this.climbHeight, this.calculateClimbHeightFromCurrentHold());
     reportQuwanEvent("grab_success", {
       score: this.score,
       hold_count: this.holdCount,
@@ -4168,7 +4201,7 @@ class Game {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.climbHeight = Math.max(this.climbHeight, this.calculateClimbHeightFromCurrentHold());
     this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
     // 火箭自动攀爬没有精准度评级，普通抓点按 0.3，道具仍优先按 0.6。
     if (window.qqNewsHaptics) {
@@ -4270,6 +4303,18 @@ class Game {
     } else {
       this.showToast(`没抓住，还剩 ${this.livesRemaining} 次机会`);
     }
+    this.preFall = {
+      currentHold: this.currentHold,
+      targetHold: this.targetHold,
+      actionType: this.lastAttempt ? this.lastAttempt.actionType : "far",
+      currentIndex: this.currentIndex,
+      score: this.score,
+      holdCount: this.holdCount,
+      climbHeight: this.climbHeight,
+      roundElapsed: this.roundElapsed,
+      finalRoundDuration: this.finalRoundDuration,
+      startWorldY: this.player.startWorldY
+    };
     this.player.beginFall(result, this.targetHold, this.recoveringFromMiss);
     this.charge = 0;
     this.chargeDirection = 1;
@@ -4483,6 +4528,203 @@ class Game {
       duration_ms: Math.round(this.finalRoundDuration * 1000),
       reason: this.failureReason || ""
     });
+    // 预加载排行榜，供“本轮成绩”弹窗展示“还差几分超越上一名”提示（不提交分数、不触发登录）
+    void this.loadRemoteLeaderboard(false);
+    // 结算弹窗出现即预加载激励广告，用户点击“还想再爬”时可直接拉起展示，减少等待。
+    if (!this.reviveUsed) {
+      const ad = window.qqNewsRewardedAd;
+      if (ad && typeof ad.preload === "function" && ad.isSupported()) {
+        void ad.preload();
+      }
+    }
+  }
+
+  getReviveGapHint() {
+    const data = this.getLeaderboardData();
+    if (!data || !Array.isArray(data.rows) || data.rows.length === 0) return null;
+
+    const currentScore = Math.max(0, Math.floor(Number(this.score) || 0));
+    const top50 = data.rows
+      .slice()
+      .sort((a, b) => b.score - a.score || a.rank - b.rank)
+      .slice(0, 50);
+    const currentRound = { score: currentScore, isCurrentRound: true };
+    const ranked = [...top50, currentRound].sort((a, b) => {
+      const scoreDiff = b.score - a.score;
+      if (scoreDiff !== 0) return scoreDiff;
+      if (a.isCurrentRound === b.isCurrentRound) return (a.rank || 0) - (b.rank || 0);
+      // 同分时将本轮成绩排在已有记录之后，保证“超越”必须至少多 1 分。
+      return a.isCurrentRound ? 1 : -1;
+    });
+    const currentIndex = ranked.findIndex((row) => row.isCurrentRound);
+
+    if (top50.length < 50 || currentIndex < 50) {
+      if (currentIndex <= 0) return null;
+      const previous = ranked[currentIndex - 1];
+      return {
+        type: "previous",
+        gap: Math.max(1, previous.score - currentScore + 1),
+        rank: Number(previous.rank) || currentIndex
+      };
+    }
+
+    const cutoff = top50[49];
+    return {
+      type: "cutoff",
+      gap: Math.max(1, cutoff.score - currentScore + 1),
+      rank: 50
+    };
+  }
+
+  applyRevive() {
+    if (!this.preFall || !this.preFall.currentHold) return;
+    this.livesRemaining = 1;
+    this.reviveUsed = true;
+    this.recoveringFromMiss = true;
+    this.roundEnded = false;
+    this.gameOverStage = null;
+    this.failureReason = "";
+    this.pendingAttempt = null;
+    this.lastAttempt = null;
+    this.animationResult = null;
+    this.charge = 0;
+    this.chargeDirection = 1;
+    this.poseCharge = 0;
+
+    const reviveBaseline = this.reviveBaseline || {};
+    // 从生成器重新同步岩点数组（广告展示期间页面可能进入后台，
+    // 导致引用不一致或缓冲区不足）。广告前基线优先于较早的坠落快照。
+    this.currentIndex = Number.isInteger(reviveBaseline.currentIndex)
+      ? reviveBaseline.currentIndex
+      : (Number.isInteger(this.preFall.currentIndex) ? this.preFall.currentIndex : 0);
+    this.routeHolds = this.generator.routeHolds;
+    this.generator.ensureHoldBuffer(this.currentIndex);
+
+    // 安全恢复当前/目标岩点（广告前基线优先，回退到坠落快照和数组索引）
+    const restoredCurrent = reviveBaseline.currentHold || this.preFall.currentHold;
+    const restoredTarget = reviveBaseline.targetHold || this.preFall.targetHold;
+    const idx = Math.max(0, Math.min(this.currentIndex, this.routeHolds.length - 1));
+    this.currentHold = (restoredCurrent && this.routeHolds.includes(restoredCurrent))
+      ? restoredCurrent
+      : this.routeHolds[idx] || restoredCurrent;
+    this.targetHold = (restoredTarget && this.routeHolds.includes(restoredTarget))
+      ? restoredTarget
+      : this.routeHolds[idx + 1] || restoredTarget;
+
+    // 复活属于同一轮继续，累计值必须单调不减。广告播放前会再冻结 reviveBaseline，
+    // 这里同时参考当前值、坠落快照和广告前基线，避免异步回调把较小快照写回。
+    this.score = Math.max(
+      Number.isFinite(this.score) ? this.score : 0,
+      Number.isFinite(this.preFall.score) ? this.preFall.score : 0,
+      Number.isFinite(reviveBaseline.score) ? reviveBaseline.score : 0
+    );
+    this.holdCount = Math.max(
+      Number.isFinite(this.holdCount) ? this.holdCount : 0,
+      Number.isFinite(this.preFall.holdCount) ? this.preFall.holdCount : 0,
+      Number.isFinite(reviveBaseline.holdCount) ? reviveBaseline.holdCount : 0
+    );
+    this.climbHeight = Math.max(
+      Number.isFinite(this.climbHeight) ? this.climbHeight : 0,
+      Number.isFinite(this.preFall.climbHeight) ? this.preFall.climbHeight : 0,
+      Number.isFinite(reviveBaseline.climbHeight) ? reviveBaseline.climbHeight : 0
+    );
+    this.roundElapsed = Math.max(
+      Number.isFinite(this.roundElapsed) ? this.roundElapsed : 0,
+      Number.isFinite(this.preFall.roundElapsed) ? this.preFall.roundElapsed : 0,
+      Number.isFinite(reviveBaseline.roundElapsed) ? reviveBaseline.roundElapsed : 0,
+      Number.isFinite(this.finalRoundDuration) ? this.finalRoundDuration : 0
+    );
+    this.finalRoundDuration = this.roundElapsed;
+
+    this.previousHold = null;
+    this.player.reset(this.currentHold.x, this.currentHold.y);
+    // player.reset 会把高度起点重置为复活点；恢复整轮初始高度基准，
+    // 让后续抓点继续按复活前的总高度累计。
+    const restoredStartWorldY = Number.isFinite(reviveBaseline.startWorldY)
+      ? reviveBaseline.startWorldY
+      : this.preFall.startWorldY;
+    if (Number.isFinite(restoredStartWorldY)) {
+      this.player.startWorldY = restoredStartWorldY;
+    }
+    this.settlePlayerPose(null, this.preFall.actionType);
+    this.camera.snapToPlayer(this.player);
+    this.player.animationStage = STATE.READY;
+    this.state = STATE.READY;
+    this.reviveBaseline = null;
+
+    // 广告原生层关闭后，部分 WebView 会短暂复用旧的 Canvas 合成帧。
+    // 立即绘制并在后续两帧再次绘制，确保刚复活时 HUD 就显示恢复后的累计值。
+    this.draw();
+    requestAnimationFrame(() => {
+      if (this.state === STATE.READY && !this.backgroundPaused) this.draw();
+      requestAnimationFrame(() => {
+        if (this.state === STATE.READY && !this.backgroundPaused) this.draw();
+      });
+    });
+  }
+
+  async requestRevive() {
+    if (this.reviveUsed || this.reviveAdLoading || !this.preFall || this.state !== STATE.GAME_OVER) return;
+    const ad = window.qqNewsRewardedAd;
+    if (!ad || typeof ad.play !== "function" || !ad.isSupported()) {
+      // 非腾讯新闻端内不展示广告入口；测试环境保留兜底，便于验证复活业务流程。
+      this.showToast("当前环境暂不支持广告");
+      return;
+    }
+    // 点击广告前冻结一次最终显示基线。即使端内广告回调期间发生生命周期切换，
+    // 复活后的分数、抓点数、高度和用时也不得低于用户点击广告时看到的值。
+    this.reviveBaseline = {
+      score: this.score,
+      holdCount: this.holdCount,
+      climbHeight: Math.max(this.climbHeight, this.calculateClimbHeightFromCurrentHold()),
+      roundElapsed: Math.max(this.roundElapsed, this.finalRoundDuration),
+      startWorldY: this.player.startWorldY,
+      currentIndex: this.currentIndex,
+      currentHold: this.currentHold,
+      targetHold: this.targetHold
+    };
+    this.reviveAdLoading = true;
+    let res;
+    try {
+      res = await ad.play();
+    } catch (e) {
+      res = { rewarded: false, reason: "exception" };
+    }
+    this.reviveAdLoading = false;
+    if (res && res.rewarded) {
+      this.applyRevive();
+      this.showToast("已观看广告，继续攀登吧！");
+    } else if (res && res.reason === "onViewClosed_no_reward") {
+      this.reviveBaseline = null;
+      this.showToast("看完广告才可以继续攀爬");
+    } else {
+      this.reviveBaseline = null;
+      this.showToast("广告暂时不可用，请稍后再试");
+    }
+  }
+
+  drawReviveButton(ctx, rect, label, c1, c2) {
+    ctx.save();
+    ctx.shadowColor = "rgba(37, 129, 166, 0.18)";
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
+    const grad = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
+    grad.addColorStop(0, c1);
+    grad.addColorStop(1, c2);
+    ctx.fillStyle = grad;
+    this.roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 16);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineWidth = 2;
+    this.roundRect(ctx, rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2, 15);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setCanvasFont(ctx, '900 16px "PingFang SC", sans-serif');
+    ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
   }
 
   settlePlayerPose(previousHold, actionType) {
@@ -7358,6 +7600,11 @@ class Game {
     this.loggedInUser = loggedIn ? QUWAN_PLATFORM.getCurrentUser() : null;
     this.guestRankingMode = !loggedIn;
     reportQuwanEvent(loggedIn ? "game_start_logged_in" : "game_start_guest", {});
+    // 开局即预加载复活广告，利用整局攀爬时间完成网络加载；结算时仍会兜底重试。
+    const ad = window.qqNewsRewardedAd;
+    if (ad && typeof ad.preload === "function" && ad.isSupported()) {
+      void ad.preload();
+    }
     this.startGame();
   }
 
@@ -7454,10 +7701,7 @@ class Game {
       reportQuwanEvent("ranking_submit_skipped", { reason: "guest" });
     }
     const result = shouldSubmitScore
-      ? await QUWAN_PLATFORM.submitScore(scoreToSubmit, {
-          height: heightToSubmit,
-          duration: durationToSubmit
-        })
+      ? await QUWAN_PLATFORM.submitScore(scoreToSubmit)
       : await QUWAN_PLATFORM.getRankingBoard();
     if (result.localPreview) {
       this.remoteLeaderboard = {
@@ -7507,53 +7751,32 @@ class Game {
   getLeaderboardData() {
     const remote = this.remoteLeaderboard || { status: "idle", entries: [], own: null };
     const best = this.scoreManager.best;
-    const currentUser = this.loggedInUser
-      || QUWAN_PLATFORM && typeof QUWAN_PLATFORM.getCurrentUser === "function" && QUWAN_PLATFORM.getCurrentUser();
     const entries = remote.entries.map((entry, index) => {
       const entryRank = Number(entry.rank) || index + 1;
       const entryScore = Number(entry.score) || 0;
-      const isOwnEntry = Boolean(remote.own && (
-        Number(remote.own.rank) > 0 && entryRank === Number(remote.own.rank)
-        || entry.userId && currentUser && currentUser.userId && entry.userId === currentUser.userId
-        || currentUser && entry.nickname === currentUser.nickname
-          && entry.avatar && currentUser.avatar && entry.avatar === currentUser.avatar
-      ));
-      const canUseLocalBest = isOwnEntry && entryScore === Number(best.score);
-      const height = Number(entry.height) > 0
-        ? Number(entry.height)
-        : canUseLocalBest ? (Number(best.height) || 0) / CONFIG.pixelsPerMeter : 0;
-      const duration = Number(entry.duration) > 0
-        ? Number(entry.duration)
-        : canUseLocalBest ? Number(best.duration) || 0 : 0;
       return {
         name: entry.nickname || "匿名用户",
         score: entryScore,
         rank: entryRank,
         avatarUrl: entry.avatar || "",
-        avatar: index % 2 === 0 ? "hairFemaleFront" : "hairMaleFront",
-        detail: `高度 ${height > 0 ? formatMeters(height) : "--"} · 用时 ${duration > 0 ? formatDuration(duration) : "--"}`
+        avatar: index % 2 === 0 ? "hairFemaleFront" : "hairMaleFront"
       };
-    });
+    })
+      .filter((entry) => entry.rank >= 1 && entry.rank <= 50)
+      .sort((a, b) => a.rank - b.rank || b.score - a.score)
+      .slice(0, 50);
     const own = remote.own ? {
       name: remote.own.nickname || "我的最高记录",
       score: Number(remote.own.score) || Number(best.score) || 0,
       rank: Number(remote.own.rank) || 0,
       avatarUrl: remote.own.avatar || "",
       avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
-      detail: `高度 ${Number(remote.own.height) > 0
-        ? formatMeters(Number(remote.own.height))
-        : formatMeters((Number(best.height) || 0) / CONFIG.pixelsPerMeter)} · 用时 ${Number(remote.own.duration) > 0
-        ? formatDuration(Number(remote.own.duration))
-        : formatDuration(Number(best.duration) || 0)}`,
       isOwn: true
     } : {
       name: this.guestRankingMode ? "游客本机记录" : "我的本机记录",
       score: Number(best.score) || 0,
       rank: 0,
       avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
-      detail: this.guestRankingMode
-        ? "游客成绩未计入排行"
-        : `高度 ${formatMeters((Number(best.height) || 0) / CONFIG.pixelsPerMeter)} · 用时 ${formatDuration(Number(best.duration) || 0)}`,
       isOwn: true
     };
     const previous = own.rank > 1 ? entries.find((row) => row.rank === own.rank - 1) : null;
@@ -7711,14 +7934,11 @@ class Game {
     ctx.textAlign = "left";
     ctx.fillStyle = highlighted ? "#178fc7" : "#163d70";
     setCanvasFont(ctx, '800 14px "PingFang SC", "Microsoft YaHei", sans-serif');
-    ctx.fillText(row.name, x + 101, y + h / 2 - 7);
+    ctx.fillText(row.name, x + 101, y + h / 2);
     ctx.textAlign = "right";
     ctx.fillStyle = "#168fc8";
     setCanvasFont(ctx, '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-    ctx.fillText(`${row.score}分`, x + w - 14, y + h / 2 - 8);
-    ctx.fillStyle = "#748097";
-    setCanvasFont(ctx, '700 12px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-    ctx.fillText(row.detail || "正式排行榜", x + w - 14, y + h / 2 + 13);
+    ctx.fillText(`${row.score}分`, x + w - 14, y + h / 2);
     ctx.restore();
   }
 
@@ -7757,7 +7977,8 @@ class Game {
     const rowH = 58;
     const rowGap = 7;
     const listY = panelY + 64;
-    const ownY = panelY + panelH - 71;
+    const footerY = panelY + panelH - 12;
+    const ownY = panelY + panelH - 88;
     const listBottom = ownY - 20;
     const listViewportHeight = Math.max(1, listBottom - listY);
     const listContentHeight = data.rows.length > 0
@@ -7850,6 +8071,13 @@ class Game {
       ctx.restore();
     }
     this.drawLeaderboardRow(ctx, data.own, rowX, ownY, rowW, 58, true);
+    ctx.save();
+    ctx.fillStyle = "#8b98a5";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    setCanvasFont(ctx, '500 11px "PingFang SC", sans-serif');
+    ctx.fillText("只显示前50名，加油上榜哦！", CONFIG.logicalWidth / 2, footerY);
+    ctx.restore();
 
     ctx.save();
     ctx.fillStyle = "#ff6b8e";
@@ -8642,85 +8870,123 @@ class Game {
       return;
     }
 
-    ctx.fillStyle = "rgba(36, 82, 100, 0.42)";
+    // Figma「本轮成绩-矢量复刻」：375 × 833 画布中的精确位置与间距。
+    ctx.fillStyle = "rgba(93, 124, 126, 0.56)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-    const x = 35;
-    const y = 205;
-    const w = CONFIG.logicalWidth - 70;
-    const h = 354;
+    const x = 39;
+    const y = 183;
+    const w = 297;
+    const cardY = y + 16;
+    const cardH = 370;
+
     ctx.save();
-    ctx.shadowColor = "rgba(38, 88, 107, 0.26)";
-    ctx.shadowBlur = 22;
-    ctx.shadowOffsetY = 10;
-    ctx.fillStyle = "rgba(249, 254, 255, 0.97)";
-    this.roundRect(ctx, x, y, w, h, 24);
+    ctx.shadowColor = "rgba(38, 88, 107, 0.18)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 8;
+    ctx.fillStyle = "rgba(250, 255, 255, 0.96)";
+    this.roundRect(ctx, x, cardY, w, cardH, 24);
     ctx.fill();
     ctx.restore();
 
     ctx.save();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = "#4bb7ef";
-    setCanvasFont(ctx, '900 38px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-    ctx.lineWidth = 9;
+    ctx.fillStyle = "#4cb7ee";
+    setCanvasFont(ctx, '900 40px "Barlow Condensed", "Arial Rounded MT Bold", "PingFang SC", sans-serif');
+    ctx.lineWidth = 8;
     ctx.lineJoin = "round";
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.98)";
-    ctx.strokeText("本轮成绩", CONFIG.logicalWidth / 2, y + 15);
-    ctx.fillText("本轮成绩", CONFIG.logicalWidth / 2, y + 15);
+    ctx.strokeStyle = "#ffffff";
+    ctx.strokeText("本轮成绩", CONFIG.logicalWidth / 2, y + 24);
+    ctx.fillText("本轮成绩", CONFIG.logicalWidth / 2, y + 24);
 
-    const scoreX = x + 29;
-    const scoreY = y + 54;
-    const scoreW = w - 58;
-    const scoreH = 100;
-    ctx.fillStyle = "rgba(226, 245, 250, 0.78)";
+    const scoreX = x + 20;
+    const scoreY = y + 52;
+    const scoreW = 257;
+    const scoreH = 97;
+    ctx.fillStyle = "#e6f6fb";
     this.roundRect(ctx, scoreX, scoreY, scoreW, scoreH, 18);
     ctx.fill();
-    ctx.fillStyle = "#778494";
-    setCanvasFont(ctx, '800 13px "PingFang SC", sans-serif');
-    ctx.fillText("本轮得分", CONFIG.logicalWidth / 2, scoreY + 23);
-    ctx.fillStyle = "#168fc8";
-    setCanvasFont(ctx, '900 42px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-    ctx.fillText(`${this.score} 分`, CONFIG.logicalWidth / 2, scoreY + 67);
+    ctx.fillStyle = "#7f899b";
+    setCanvasFont(ctx, '700 13px "PingFang SC", sans-serif');
+    ctx.fillText("本轮得分", CONFIG.logicalWidth / 2, scoreY + 22);
+    ctx.fillStyle = "#199acf";
+    setCanvasFont(ctx, '900 43px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
+    ctx.fillText(`${this.score} 分`, CONFIG.logicalWidth / 2, scoreY + 65);
 
-    const statW = 126;
-    const statH = 64;
+    const statW = 122;
+    const statH = 63;
     const statGap = 13;
-    const statsX = x + (w - statW * 2 - statGap) / 2;
-    const statsY = y + 168;
+    const statsX = x + 20;
+    const statsY = y + 161;
     const stats = [
-      { label: "攀爬高度", value: formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), color: "#ff5f8c" },
-      { label: "坚持时间", value: formatDuration(this.finalRoundDuration), color: "#27a98a" }
+      { label: "攀爬高度", value: formatMeters(this.climbHeight / CONFIG.pixelsPerMeter), color: "#ff5d8b" },
+      { label: "坚持时间", value: formatDuration(this.finalRoundDuration), color: "#19aa84" }
     ];
     stats.forEach((stat, index) => {
       const statX = statsX + index * (statW + statGap);
-      ctx.fillStyle = "rgba(226, 245, 250, 0.66)";
+      ctx.fillStyle = "#eaf9fb";
       this.roundRect(ctx, statX, statsY, statW, statH, 14);
       ctx.fill();
-      ctx.fillStyle = "#778494";
+      ctx.fillStyle = "#7f899b";
       setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
-      ctx.fillText(stat.label, statX + statW / 2, statsY + 19);
+      ctx.fillText(stat.label, statX + statW / 2, statsY + 18);
       ctx.fillStyle = stat.color;
-      setCanvasFont(ctx, '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-      ctx.fillText(stat.value, statX + statW / 2, statsY + 44);
+      setCanvasFont(ctx, '900 22px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
+      ctx.fillText(stat.value, statX + statW / 2, statsY + 43);
     });
 
-    const reasonY = y + 245;
-    ctx.fillStyle = "rgba(255, 226, 234, 0.78)";
-    this.roundRect(ctx, x + 29, reasonY, w - 58, 48, 15);
+    const reasonY = y + 236;
+    ctx.fillStyle = "#e6f6fb";
+    this.roundRect(ctx, x + 20, reasonY, 257, 46, 15);
     ctx.fill();
-    ctx.fillStyle = "#9b6674";
+    ctx.fillStyle = "#b96d7c";
     setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
-    ctx.fillText("掉落原因", CONFIG.logicalWidth / 2, reasonY + 14);
-    ctx.fillStyle = this.failureReason === "力量过大" ? "#ff5f8c" : "#315f72";
-    setCanvasFont(ctx, '900 17px "PingFang SC", sans-serif');
-    ctx.fillText(this.failureReason || "挑战结束", CONFIG.logicalWidth / 2, reasonY + 34);
+    ctx.fillText("掉落原因", CONFIG.logicalWidth / 2, reasonY + 13);
+    ctx.fillStyle = "#315862";
+    setCanvasFont(ctx, '900 16px "PingFang SC", sans-serif');
+    ctx.fillText(this.failureReason || "挑战结束", CONFIG.logicalWidth / 2, reasonY + 32);
 
-    ctx.fillStyle = "#315f72";
-    setCanvasFont(ctx, '800 15px "PingFang SC", sans-serif');
-    ctx.fillText("点击屏幕查看排行榜", CONFIG.logicalWidth / 2, y + 316);
-    ctx.fillStyle = "rgba(49, 95, 114, 0.50)";
-    setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
-    ctx.fillText("看看你的最高纪录与上一名还有多远", CONFIG.logicalWidth / 2, y + 337);
+    const gapHint = this.getReviveGapHint();
+    const gapText = !gapHint
+      ? "去排行榜看看你能排第几"
+      : gapHint.type === "cutoff"
+        ? `还有${gapHint.gap}分就可以上榜啦！`
+        : `还差${gapHint.gap}分即可超越排行榜上一名`;
+    ctx.fillStyle = "#eb6bb3";
+    setCanvasFont(ctx, '600 14px "PingFang SC", sans-serif');
+    ctx.fillText(
+      gapText,
+      CONFIG.logicalWidth / 2,
+      y + 302
+    );
+
+    // 两个操作按钮使用 Figma 原始切图；点击区域严格对应设计节点尺寸。
+    const btnY = y + 320;
+    const btnH = 46;
+    this.reviveButtonRect = null;
+    if (!this.reviveUsed) {
+      this.reviveButtonRect = { x: 59, y: btnY, w: 122, h: btnH };
+      this.quitButtonRect = { x: 194, y: btnY, w: 122, h: btnH };
+      const reviveAsset = this.figmaUiAssets && this.figmaUiAssets.resultReviveButton;
+      const quitAsset = this.figmaUiAssets && this.figmaUiAssets.resultQuitButton;
+      if (!this.drawImageAssetContain(ctx, reviveAsset, 59, btnY, 122, 51)) {
+        this.drawReviveButton(ctx, this.reviveButtonRect, "还想爬", "#22baf9", "#008ac4");
+      }
+      if (!this.drawImageAssetContain(ctx, quitAsset, 194, btnY, 122, 50)) {
+        this.drawReviveButton(ctx, this.quitButtonRect, "就爬到这", "#b7f3ff", "#3cd1f0");
+      }
+      if (this.reviveAdLoading) {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.24)";
+        this.roundRect(ctx, 59, btnY, 122, btnH, 16);
+        ctx.fill();
+      }
+    } else {
+      this.quitButtonRect = { x: 59, y: btnY, w: 257, h: btnH };
+      const quitWideAsset = this.figmaUiAssets && this.figmaUiAssets.resultQuitButtonWide;
+      if (!this.drawImageAssetContain(ctx, quitWideAsset, 59, btnY, 257, 50)) {
+        this.drawReviveButton(ctx, this.quitButtonRect, "就爬到这", "#b7f3ff", "#3cd1f0");
+      }
+    }
     ctx.restore();
   }
 

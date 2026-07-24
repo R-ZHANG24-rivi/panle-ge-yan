@@ -172,33 +172,6 @@
     };
   }
 
-  function normalizeRankingExtra(value, fallback = {}) {
-    const parsed = parseJsonObject(value);
-    const nested = parseJsonObject(parsed.data || parsed.meta || parsed.extra);
-    const source = { ...fallback, ...parsed, ...nested };
-    const height = Number(
-      source.heightMeters
-      ?? source.height_meters
-      ?? source.height
-      ?? source.climbHeight
-      ?? source.climb_height
-      ?? source.ranking_height
-    );
-    const duration = Number(
-      source.durationSeconds
-      ?? source.duration_seconds
-      ?? source.duration
-      ?? source.time
-      ?? source.elapsed
-      ?? source.elapsed_time
-      ?? source.ranking_duration
-    );
-    return {
-      height: Number.isFinite(height) && height > 0 ? height : 0,
-      duration: Number.isFinite(duration) && duration > 0 ? duration : 0
-    };
-  }
-
   function getCurrentUser() {
     if (!cachedUserInfo) return null;
     return {
@@ -501,13 +474,9 @@
         item.user_info.name
       );
       if (!nickname) return null;
-      const extra = normalizeRankingExtra(item && item.extra, {
-        height: item && (item.height ?? item.climb_height ?? (item.ranking && item.ranking.height)),
-        duration: item && (item.duration ?? item.elapsed_time ?? (item.ranking && item.ranking.duration))
-      });
       return {
         rank: Number(item && item.ranking && item.ranking.rank) || index + 1,
-        score: Number(item && item.ranking && item.ranking.score) || 0,
+        score: Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(item && item.ranking && item.ranking.score) || 0))),
         nickname,
         userId: item && item.user_info && firstText(
           item.user_info.suid,
@@ -519,28 +488,22 @@
           item.user_info.head,
           item.user_info.avatar,
           item.user_info.avatarUrl
-        )) || "",
-        height: extra.height,
-        duration: extra.duration
+        )) || ""
       };
-    }).filter(Boolean);
+    })
+      .filter(Boolean)
+      .filter((entry) => entry.rank >= 1 && entry.rank <= RANKING_SIZE)
+      .sort((a, b) => a.rank - b.rank || b.score - a.score)
+      .slice(0, RANKING_SIZE);
     const bestRank = data.best_rank || {};
-    const ownBoardEntry = entries.find((entry) => (
-      Number(bestRank.rank) > 0
-      && entry.rank === Number(bestRank.rank)
-      && entry.score === Number(bestRank.score)
-    ));
-    const ownExtra = normalizeRankingExtra(data.best_rank_extra);
     return {
       entries,
       own: {
         rank: Number(bestRank.rank) || 0,
-        score: Number(bestRank.score) || 0,
+        score: Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(bestRank.score) || 0))),
         nickname: cachedUserInfo && cachedUserInfo.nickname || "我的最高记录",
         userId: cachedUserInfo && cachedUserInfo.userId || "",
-        avatar: cachedUserInfo && cachedUserInfo.avatar || "",
-        height: ownExtra.height || ownBoardEntry && ownBoardEntry.height || 0,
-        duration: ownExtra.duration || ownBoardEntry && ownBoardEntry.duration || 0
+        avatar: cachedUserInfo && cachedUserInfo.avatar || ""
       },
       totalPlayers: Number(data.ranking_size) || entries.length,
       lessScoreCount: Number(data.less_score_count) || 0
@@ -635,7 +598,7 @@
     return { success: false, error: lastError && lastError.message || "排行榜加载失败" };
   }
 
-  async function submitScore(score, details = {}) {
+  async function submitScore(score) {
     if (isLocalPreview()) {
       return { success: true, localPreview: true, data: { entries: [], own: null } };
     }
@@ -643,27 +606,18 @@
     if (!loginResult.success) return loginResult;
     const bknSign = await getBknSign();
     if (!bknSign) return { success: false, error: "未读取到登录签名，请重新登录" };
+    // 排行榜平台只接受 0~999999 的整数分值；不要把高度/用时打包进 score。
     const safeScore = Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(score) || 0)));
-    const safeHeight = Math.min(99999.9, Math.max(0, Math.round(Number(details.height) * 10) / 10 || 0));
-    const safeDuration = Math.min(86400, Math.max(0, Math.round(Number(details.duration)) || 0));
-    const extra = JSON.stringify({
-      height: safeHeight,
-      duration: safeDuration,
-      version: 1
-    });
     try {
       const data = await postRanking("/activity/ranking", {
         activityId: getActivityId(),
         cumulativeRanking: CUMULATIVE_RANKING,
         rankingSize: RANKING_SIZE,
         score: safeScore,
-        bknSign,
-        extra
+        bknSign
       });
       reportEvent("ranking_submit_success", {
         score: safeScore,
-        height: safeHeight,
-        duration: safeDuration,
         rank: data.own && data.own.rank || 0
       });
       return { success: true, data };
