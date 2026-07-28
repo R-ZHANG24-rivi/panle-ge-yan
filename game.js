@@ -16,6 +16,12 @@ const CONFIG = {
   targetGrabRingPadding: 14,
   maxLives: 3,
   pixelsPerMeter: 100,
+  // 攀爬高度按成功抓点的实际距离档位累计，仍以 pixelsPerMeter 作为内部存储比例。
+  heightNearDistanceMax: 145,
+  heightNormalDistanceMax: 200,
+  heightNearGainMeters: 0.3,
+  heightNormalGainMeters: 0.5,
+  heightFarGainMeters: 0.7,
   wallPadding: 48,
   safeTop: 40,
   safeBottom: 60,
@@ -30,8 +36,8 @@ const CONFIG = {
   holdBufferAhead: 14,
   removeBelowCamera: 260,
 
-  supportHoldsPerRouteMin: 3,
-  supportHoldsPerRouteMax: 6,
+  // 80% 概率预铺 1 个辅助脚点；必要兜底点会在路线进入屏幕前提前补齐。
+  supportHoldSpawnChance: 0.8,
   supportOffsetXMin: 35,
   supportOffsetXMax: 118,
   supportOffsetYMin: 28,
@@ -222,6 +228,7 @@ const THEME = {
     route: ["#1264b4", "#247fd0", "#0f4f8f", "#f7fafb", "#18242c"],
     support: ["#3e91cf", "#78b9df", "#ffffff", "#17242b", "#ee5b9b"],
     visualScale: 0.72,
+    inactiveAlpha: 0.28,
     contactStroke: "#fff9d6",
     boltOuter: "#f7fafb",
     boltInner: "#14202a"
@@ -459,6 +466,15 @@ function lerp(a, b, t) {
 
 function lerpPoint(a, b, t) {
   return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) };
+}
+
+function quadraticBezierPoint(start, control, end, t) {
+  const clampedT = clamp(t, 0, 1);
+  const inverse = 1 - clampedT;
+  return {
+    x: inverse * inverse * start.x + 2 * inverse * clampedT * control.x + clampedT * clampedT * end.x,
+    y: inverse * inverse * start.y + 2 * inverse * clampedT * control.y + clampedT * clampedT * end.y
+  };
 }
 
 function easeOutCubic(t) {
@@ -1401,14 +1417,9 @@ class HoldGenerator {
   }
 
   generateSupportHoldsAround(routeHold) {
-    const count = Math.floor(lerp(CONFIG.supportHoldsPerRouteMin, CONFIG.supportHoldsPerRouteMax + 1, Math.random()));
+    const count = Math.random() < CONFIG.supportHoldSpawnChance ? 1 : 0;
     const presets = [
-      { sx: -1, yMin: 62, yMax: 152 },
-      { sx: 1, yMin: 62, yMax: 152 },
-      { sx: -1, yMin: -6, yMax: 70 },
-      { sx: 1, yMin: -6, yMax: 70 },
-      { sx: Math.random() < 0.5 ? -1 : 1, yMin: 118, yMax: 174 },
-      { sx: Math.random() < 0.5 ? -1 : 1, yMin: -34, yMax: 24 }
+      { sx: Math.random() < 0.5 ? -1 : 1, yMin: 62, yMax: 152 }
     ];
     const created = [];
     for (let i = 0; i < count; i += 1) {
@@ -1426,7 +1437,7 @@ class HoldGenerator {
         const tooCloseToRoute = distance(candidate, routeHold) < 28;
         const tooCloseToSupport = created.some((hold) => distance(candidate, hold) < CONFIG.supportMinSpacing);
         if (!tooCloseToRoute && !tooCloseToSupport) {
-          const hold = this.createSupportHold(x, y, routeHold.id, false, i < 2);
+          const hold = this.createSupportHold(x, y, routeHold.id, false, true);
           if (this.isCandidateClear(hold, created)) {
             this.supportHolds.push(hold);
             created.push(hold);
@@ -2982,6 +2993,9 @@ class Game {
     };
     this.rocketButtonRect = null;
     this.rocketIconRects = [];
+    this.rocketPickupAnimation = null;
+    this.rocketInventoryPulse = null;
+    this.powerUpPickupAnimation = null;
     this.rocketHintActive = false;
     this.rocketHintEverShown = false;
     this.rocketHintTimer = 0;
@@ -3026,7 +3040,8 @@ class Game {
     this.player.reset(CONFIG.logicalWidth / 2, 760);
     this.routeHolds = this.generator.generateInitialHolds(CONFIG.logicalWidth / 2, 760);
     this.currentHold = this.routeHolds[0];
-    this.targetHold = this.routeHolds[1];
+    this.prepareFootSupportsForRouteBuffer();
+    this.setTargetHold(this.routeHolds[1]);
     this.tutorialTargetCharge = this.calculateTutorialTargetCharge();
     this.tutorialCompleteAwaitingDismiss = false;
     this.previousHold = null;
@@ -3074,6 +3089,7 @@ class Game {
     this.startDemoAttempt = null;
     this.startDemoActionType = "far";
     this.generator.ensureHoldBuffer(this.currentIndex);
+    this.prepareFootSupportsForRouteBuffer();
     this.settlePlayerPose(null, "far");
     this.snapStartDemoCameraToPlayer();
   }
@@ -3216,12 +3232,15 @@ class Game {
     this.currentHold = nextHold;
     this.generator.ensureHoldBuffer(this.currentIndex);
     this.routeHolds = this.generator.routeHolds;
-    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    this.prepareFootSupportsForRouteBuffer();
+    this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     if (this.targetHold) {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.addClimbHeightForDistance(
+      this.startDemoAttempt ? this.startDemoAttempt.targetDistance : distance(oldHold, nextHold)
+    );
     const neutral = this.player.getNeutralBodyForHold(this.currentHold);
     const feet = this.chooseFeetSupportsForBody("front", neutral);
     this.player.beginBodyFollow(this.currentHold, feet.leftFoot, feet.rightFoot);
@@ -3239,12 +3258,13 @@ class Game {
       this.camera.active = false;
     }
     this.generator.ensureHoldBuffer(this.currentIndex);
+    this.prepareFootSupportsForRouteBuffer();
     const removed = this.generator.removeOldHolds(this.camera.y, this.currentIndex, this.getProtectedHoldIds());
     if (removed > 0) {
       this.currentIndex -= removed;
       this.routeHolds = this.generator.routeHolds;
       this.currentHold = this.routeHolds[this.currentIndex];
-      this.targetHold = this.routeHolds[this.currentIndex + 1];
+      this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     }
   }
   loop(time) {
@@ -3272,6 +3292,8 @@ class Game {
     if (this.rocketHintTimer > 0) {
       this.rocketHintTimer = Math.max(0, this.rocketHintTimer - deltaTime);
     }
+    this.updateRocketPickupAnimation(deltaTime);
+    this.updatePowerUpPickupAnimation(deltaTime);
     if (this.feedbackTime > 0) {
       this.feedbackTime = Math.max(0, this.feedbackTime - deltaTime);
       if (this.feedbackTime === 0) {
@@ -3510,7 +3532,7 @@ class Game {
       this.activateUiButton(menuButton.id);
       return true;
     }
-    // 火箭按钮：游戏进行中右上角
+    // 火箭按钮：游戏进行中底部居中
     if (this.rocketButtonRect && this.pointInRect(point, this.rocketButtonRect)) {
       this.useRocket();
       return true;
@@ -3797,6 +3819,7 @@ class Game {
     this.pendingAttempt = {
       oldHold: this.currentHold,
       targetHold: this.targetHold,
+      targetDistance: attempt.targetDistance,
       actionType,
       leadHand: this.player.leadHandName,
       trailingHand: this.player.trailingHandName,
@@ -3844,13 +3867,16 @@ class Game {
     }
   }
 
-  activatePowerUp(type) {
+  activatePowerUp(type, sourceHold = null) {
     if (!POWER_UPS[type]) {
       return;
     }
     const duration = CONFIG.powerUpDurations[type] || 3;
     this.powerUps[type] = duration;
     this.audio.playPowerUp();
+    if (type === "magnet" || type === "magnifier") {
+      this.startPowerUpPickupAnimation(type, sourceHold || this.currentHold);
+    }
     this.showToast(`${POWER_UPS[type].label}生效 ${duration} 秒`);
   }
 
@@ -3858,8 +3884,22 @@ class Game {
     return Boolean(this.powerUps && (this.powerUps.magnet > 0 || this.powerUps.magnifier > 0));
   }
 
-  calculateClimbHeightFromCurrentHold() {
-    return Math.max(0, this.player.startWorldY - (this.currentHold.y + CONFIG.playerBodyOffsetY));
+  getClimbHeightGainForDistance(targetDistance) {
+    const distanceValue = Number(targetDistance);
+    if (!Number.isFinite(distanceValue) || distanceValue < 0) {
+      return 0;
+    }
+    if (distanceValue <= CONFIG.heightNearDistanceMax) {
+      return CONFIG.heightNearGainMeters * CONFIG.pixelsPerMeter;
+    }
+    if (distanceValue <= CONFIG.heightNormalDistanceMax) {
+      return CONFIG.heightNormalGainMeters * CONFIG.pixelsPerMeter;
+    }
+    return CONFIG.heightFarGainMeters * CONFIG.pixelsPerMeter;
+  }
+
+  addClimbHeightForDistance(targetDistance) {
+    this.climbHeight += this.getClimbHeightGainForDistance(targetDistance);
   }
 
   getTargetGrabRadius() {
@@ -3976,12 +4016,12 @@ class Game {
     this.currentHold.state = "grabbed";
     this.currentIndex += 1;
     this.currentHold = this.targetHold;
-    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     if (this.targetHold) {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.addClimbHeightForDistance(this.pendingAttempt.targetDistance);
     reportQuwanEvent("grab_success", {
       score: this.score,
       hold_count: this.holdCount,
@@ -3996,22 +4036,22 @@ class Game {
     if (grabbedPowerUp) {
       if (grabbedPowerUp === "rocket") {
         const prevRockets = this.autoClimb.rockets;
-        this.autoClimb.rockets = Math.min(CONFIG.maxRockets, prevRockets + 1);
+        const nextRockets = Math.min(CONFIG.maxRockets, prevRockets + 1);
+        const added = nextRockets > prevRockets;
+        this.autoClimb.rockets = nextRockets;
         this.audio.playPowerUp();
-        this.showToast("\u83B7\u5F97\u5C0F\u706B\u7BAD \uD83D\uDE80");
-        // 首次收集到小火箭：在左上角火箭图标旁显示一行小字提示
-        if (!this.rocketHintEverShown) {
-          this.rocketHintEverShown = true;
-          this.rocketHintActive = true;
-          this.rocketHintTimer = 5;
-        }
-        // 达到上限时提示使用
-        if (this.autoClimb.rockets >= CONFIG.maxRockets && !this.rocketMaxPrompted) {
+        this.startRocketPickupAnimation(
+          this.currentHold,
+          Math.max(0, nextRockets - 1),
+          Math.max(1, nextRockets),
+          added,
+          nextRockets >= CONFIG.maxRockets
+        );
+        if (nextRockets >= CONFIG.maxRockets && !this.rocketMaxPrompted) {
           this.rocketMaxPrompted = true;
-          this.showToast("\u5C0F\u706B\u7BAD\u5DF2\u6EE1\uff0c\u70B9\u51FB\u53D1\u5C04\uff01");
         }
       } else {
-        this.activatePowerUp(grabbedPowerUp);
+        this.activatePowerUp(grabbedPowerUp, this.currentHold);
       }
     }
     const feet = this.chooseFeetSupportsForBody("front", this.player.getNeutralBodyForHold(this.currentHold));
@@ -4057,8 +4097,128 @@ class Game {
     }
   }
 
+  startRocketPickupAnimation(hold, slotIndex, rocketCount, added, full) {
+    const screen = this.worldToScreen(hold);
+    const start = {
+      x: screen.x,
+      y: screen.y - this.getHoldVisualRadius(hold) - 18
+    };
+    const dock = this.getRocketDockLayout(rocketCount);
+    const end = {
+      x: dock.baseX + slotIndex * (dock.iconSize + dock.gap) + dock.iconSize / 2,
+      y: dock.baseY + dock.iconSize / 2
+    };
+    const horizontalDirection = end.x >= start.x ? 1 : -1;
+    const control = {
+      x: lerp(start.x, end.x, 0.46) + horizontalDirection * 26,
+      y: Math.min(start.y, end.y) - 92
+    };
+    this.rocketPickupAnimation = {
+      start,
+      control,
+      end,
+      elapsed: 0,
+      duration: 0.56,
+      slotIndex,
+      hideDestination: added,
+      message: full ? "小火箭已满，点击发射！" : "小火箭已就位，点击即可使用 🚀",
+      showHintOnComplete: added && !this.rocketHintEverShown
+    };
+    this.rocketInventoryPulse = null;
+  }
+
+  updateRocketPickupAnimation(deltaTime) {
+    if (this.rocketInventoryPulse) {
+      this.rocketInventoryPulse.elapsed += deltaTime;
+      if (this.rocketInventoryPulse.elapsed >= this.rocketInventoryPulse.duration) {
+        this.rocketInventoryPulse = null;
+      }
+    }
+
+    const animation = this.rocketPickupAnimation;
+    if (!animation) {
+      return;
+    }
+    animation.elapsed += deltaTime;
+    if (animation.elapsed < animation.duration) {
+      return;
+    }
+
+    this.rocketPickupAnimation = null;
+    this.rocketInventoryPulse = {
+      slotIndex: animation.slotIndex,
+      elapsed: 0,
+      duration: 0.28
+    };
+    if (animation.showHintOnComplete) {
+      this.rocketHintEverShown = true;
+      this.rocketHintActive = true;
+      this.rocketHintTimer = 5;
+    }
+    this.showToast(animation.message);
+  }
+
+  startPowerUpPickupAnimation(type, hold) {
+    if (!hold) {
+      return;
+    }
+    const screen = this.worldToScreen(hold);
+    const start = {
+      x: screen.x,
+      y: screen.y - this.getHoldVisualRadius(hold) - 18
+    };
+    const end = {
+      x: clamp(lerp(start.x, CONFIG.logicalWidth / 2, 0.36), 74, CONFIG.logicalWidth - 74),
+      y: clamp(start.y - 34, 190, 520)
+    };
+    const palette = type === "magnet"
+      ? { rgb: "255, 58, 169", lightRgb: "255, 205, 232" }
+      : { rgb: "52, 169, 196", lightRgb: "191, 243, 255" };
+    this.powerUpPickupAnimation = {
+      type,
+      start,
+      end,
+      elapsed: 0,
+      duration: 0.74,
+      palette
+    };
+  }
+
+  startRocketActivationAnimation(rocketCount) {
+    const dock = this.getRocketDockLayout(rocketCount);
+    const slotIndex = Math.max(0, rocketCount - 1);
+    this.powerUpPickupAnimation = {
+      type: "rocket",
+      start: {
+        x: dock.baseX + slotIndex * (dock.iconSize + dock.gap) + dock.iconSize / 2,
+        y: dock.baseY + dock.iconSize / 2
+      },
+      end: {
+        x: CONFIG.logicalWidth / 2,
+        y: 460
+      },
+      elapsed: 0,
+      duration: 0.74,
+      palette: {
+        rgb: "72, 135, 219",
+        lightRgb: "255, 226, 116"
+      }
+    };
+  }
+
+  updatePowerUpPickupAnimation(deltaTime) {
+    if (!this.powerUpPickupAnimation) {
+      return;
+    }
+    this.powerUpPickupAnimation.elapsed += deltaTime;
+    if (this.powerUpPickupAnimation.elapsed >= this.powerUpPickupAnimation.duration) {
+      this.powerUpPickupAnimation = null;
+    }
+  }
+
   useRocket() {
-    if (this.autoClimb.rockets <= 0 || this.autoClimb.active) return;
+    if (this.autoClimb.rockets <= 0 || this.autoClimb.active || this.rocketPickupAnimation) return;
+    this.startRocketActivationAnimation(this.autoClimb.rockets);
     this.autoClimb.rockets -= 1;
     this.rocketHintActive = false;
     if (this.autoClimb.rockets < CONFIG.maxRockets) {
@@ -4128,8 +4288,9 @@ class Game {
   beginAutoClimbStep() {
     this.generator.ensureHoldBuffer(this.currentIndex);
     this.routeHolds = this.generator.routeHolds;
+    this.prepareFootSupportsForRouteBuffer();
     this.currentHold = this.routeHolds[this.currentIndex];
-    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     if (!this.currentHold || !this.targetHold) {
       this.finishAutoClimb();
       return;
@@ -4142,6 +4303,7 @@ class Game {
     this.pendingAttempt = {
       oldHold: this.currentHold,
       targetHold: this.targetHold,
+      targetDistance: attempt.targetDistance,
       actionType,
       leadHand: this.player.leadHandName,
       trailingHand: this.player.trailingHandName,
@@ -4163,19 +4325,19 @@ class Game {
     this.currentHold.state = "grabbed";
     this.currentIndex += 1;
     this.currentHold = this.targetHold;
-    this.targetHold = this.routeHolds[this.currentIndex + 1];
+    this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     if (this.targetHold) {
       this.targetHold.state = "target";
     }
     this.holdCount += 1;
-    this.climbHeight = this.calculateClimbHeightFromCurrentHold();
+    this.addClimbHeightForDistance(this.pendingAttempt.targetDistance);
     this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
     // 火箭自动攀爬没有精准度评级，普通抓点按 0.3，道具仍优先按 0.6。
     if (window.qqNewsHaptics) {
       window.qqNewsHaptics.vibrate(getGrabHapticIntensity("risky", 0, grabbedPowerUp));
     }
     if (grabbedPowerUp) {
-      this.activatePowerUp(grabbedPowerUp);
+      this.activatePowerUp(grabbedPowerUp, this.currentHold);
     }
 
     const neutral = this.player.getNeutralBodyForHold(this.currentHold);
@@ -4248,6 +4410,7 @@ class Game {
       ? Math.max(0, Math.floor(Number(this.autoClimb.rockets) || 0))
       : 0;
     if (rescueRocketCount > 0) {
+      this.startRocketActivationAnimation(rescueRocketCount);
       this.autoClimb.rockets = 0;
       this.pendingRocketGameOver = true;
       this.pendingRocketFallResult = result;
@@ -4312,12 +4475,13 @@ class Game {
 
   finishCameraFollow() {
     this.generator.ensureHoldBuffer(this.currentIndex);
+    this.prepareFootSupportsForRouteBuffer();
     const removed = this.generator.removeOldHolds(this.camera.y, this.currentIndex, this.getProtectedHoldIds());
     if (removed > 0) {
       this.currentIndex -= removed;
       this.routeHolds = this.generator.routeHolds;
       this.currentHold = this.routeHolds[this.currentIndex];
-      this.targetHold = this.routeHolds[this.currentIndex + 1];
+      this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     }
     this.player.animationStage = STATE.READY;
     this.state = STATE.READY;
@@ -4374,12 +4538,13 @@ class Game {
       this.camera.active = false;
     }
     this.generator.ensureHoldBuffer(this.currentIndex);
+    this.prepareFootSupportsForRouteBuffer();
     const removed = this.generator.removeOldHolds(this.camera.y, this.currentIndex, this.getProtectedHoldIds());
     if (removed > 0) {
       this.currentIndex -= removed;
       this.routeHolds = this.generator.routeHolds;
       this.currentHold = this.routeHolds[this.currentIndex];
-      this.targetHold = this.routeHolds[this.currentIndex + 1];
+      this.setTargetHold(this.routeHolds[this.currentIndex + 1]);
     }
   }
 
@@ -4397,6 +4562,37 @@ class Game {
     this.player.worldY = saved.y;
     this.player.bodyAngle = saved.angle;
     return feet;
+  }
+
+  setTargetHold(hold) {
+    this.targetHold = hold || null;
+    if (!this.targetHold || !this.currentHold) {
+      return;
+    }
+
+    this.prepareFootSupportForHold(this.targetHold);
+  }
+
+  prepareFootSupportsForRouteBuffer() {
+    for (const hold of this.routeHolds) {
+      this.prepareFootSupportForHold(hold);
+    }
+  }
+
+  prepareFootSupportForHold(hold) {
+    if (!hold || !this.currentHold) {
+      return;
+    }
+
+    // 提前模拟该岩点的落地姿态；只有确实无点可踩时才补 1 个必要脚点。
+    const previousCurrentHold = this.currentHold;
+    this.currentHold = hold;
+    try {
+      const neutral = this.player.getNeutralBodyForHold(hold);
+      this.chooseFeetSupportsForBody("front", neutral);
+    } finally {
+      this.currentHold = previousCurrentHold;
+    }
   }
 
   getMissRecoveryLimbTargets(bodyPosition) {
@@ -4467,7 +4663,7 @@ class Game {
       return;
     }
     this.roundEnded = true;
-    this.climbHeight = Math.max(this.climbHeight, this.calculateClimbHeightFromCurrentHold());
+    this.climbHeight = Math.max(0, this.climbHeight);
     this.finalRoundDuration = this.roundElapsed;
     this.gameOverStage = "summary";
     this.newBest = this.scoreManager.saveBestScore({
@@ -4852,6 +5048,12 @@ class Game {
     if (this.state !== STATE.GAME_OVER && !this.roundEnded) {
       this.drawUiControls(ctx);
     }
+    if (this.powerUpPickupAnimation && !this.roundEnded) {
+      this.drawPowerUpPickupAnimation(ctx);
+    }
+    if (this.rocketPickupAnimation && !this.roundEnded) {
+      this.drawRocketPickupAnimation(ctx);
+    }
     if (this.state !== STATE.GAME_OVER && !this.roundEnded && this.tutorialCompleteTime > 0 && !this.uiPanel) {
       this.drawTutorialComplete(ctx);
     }
@@ -4953,6 +5155,20 @@ class Game {
     ctx.restore();
   }
 
+  getRocketDockLayout(rockets = this.autoClimb.rockets) {
+    const iconSize = 48;
+    const gap = 8;
+    const safeCount = Math.max(1, rockets);
+    const totalWidth = safeCount * iconSize + (safeCount - 1) * gap;
+    return {
+      iconSize,
+      gap,
+      totalWidth,
+      baseX: (CONFIG.logicalWidth - totalWidth) / 2,
+      baseY: CONFIG.logicalHeight - CONFIG.safeBottom - iconSize - 4
+    };
+  }
+
   drawRocketButton(ctx) {
     if (this.state === STATE.START || this.state === STATE.LOADING || this.roundEnded || this.tutorialActive) {
       this.rocketButtonRect = null;
@@ -4969,11 +5185,8 @@ class Game {
 
     ctx.save();
 
-    // 图标排列：参考截图4，在HUD信息下方（当前高度行下方），左侧对齐
-    const iconSize = 36;
-    const gap = 6;
-    const baseX = CONFIG.safeSide + 3;
-    const baseY = CONFIG.safeTop + 108;
+    // 火箭库存作为底部居中的独立操作区，避开顶部 HUD，并留出底部安全区。
+    const { iconSize, gap, totalWidth, baseX, baseY } = this.getRocketDockLayout(rockets);
 
     this.rocketIconRects = [];
     ctx.globalAlpha = isAutoClimbing ? 0.84 : 1;
@@ -4983,6 +5196,23 @@ class Game {
       const iy = baseY;
       const rect = { id: "rocket", index: i, x: ix, y: iy, w: iconSize, h: iconSize };
       this.rocketIconRects.push(rect);
+      const isArriving = this.rocketPickupAnimation
+        && this.rocketPickupAnimation.hideDestination
+        && this.rocketPickupAnimation.slotIndex === i;
+      if (isArriving) {
+        continue;
+      }
+
+      const pulse = this.rocketInventoryPulse && this.rocketInventoryPulse.slotIndex === i
+        ? Math.sin(Math.PI * clamp(
+            this.rocketInventoryPulse.elapsed / this.rocketInventoryPulse.duration,
+            0,
+            1
+          ))
+        : 0;
+      const drawSize = iconSize * (1 + pulse * 0.18);
+      const drawX = ix + (iconSize - drawSize) / 2;
+      const drawY = iy + (iconSize - drawSize) / 2;
 
       // 火箭图标
       const asset = this.uiIconAssets["rocket"];
@@ -4990,55 +5220,40 @@ class Game {
         ctx.save();
         ctx.shadowColor = "#ffffff";
         ctx.shadowBlur = 0;
-        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+        // 加粗到约 3px，让底部火箭在岩壁背景上更醒目。
+        for (let offsetY = -3; offsetY <= 3; offsetY += 3) {
+          for (let offsetX = -3; offsetX <= 3; offsetX += 3) {
             if (offsetX === 0 && offsetY === 0) continue;
             ctx.shadowOffsetX = offsetX;
             ctx.shadowOffsetY = offsetY;
-            ctx.drawImage(asset.image, ix, iy, iconSize, iconSize);
+            ctx.drawImage(asset.image, drawX, drawY, drawSize, drawSize);
           }
         }
         ctx.restore();
-        ctx.drawImage(asset.image, ix, iy, iconSize, iconSize);
+        ctx.drawImage(asset.image, drawX, drawY, drawSize, drawSize);
       } else {
         // fallback
         ctx.fillStyle = "#ffd93d";
-        setCanvasFont(ctx, "bold 24px Arial");
+        setCanvasFont(ctx, `bold ${32 * (1 + pulse * 0.18)}px Arial`);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 5;
         ctx.strokeText("\uD83D\uDE80", ix + iconSize / 2, iy + iconSize / 2);
         ctx.fillText("\uD83D\uDE80", ix + iconSize / 2, iy + iconSize / 2);
       }
     }
     ctx.globalAlpha = 1;
 
-    if (isAutoClimbing) {
-      const statusText = `爆发中 · 剩余 ${rockets}`;
-      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
-      const statusPadX = 9;
-      const statusW = ctx.measureText(statusText).width + statusPadX * 2;
-      const statusH = 24;
-      const statusY = baseY + iconSize + 7;
-      ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
-      this.roundRect(ctx, baseX, statusY, statusW, statusH, statusH / 2);
-      ctx.fill();
-      ctx.fillStyle = "#ff5f8c";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(statusText, baseX + statusPadX, statusY + statusH / 2 + 0.5);
-    }
-
-    // 首次收集火箭提示：图标下方一行小字（5秒渐隐）
+    // 首次收集火箭提示：位于底部火箭图标正下方（5秒渐隐）。
     if (this.rocketHintActive && this.rocketHintTimer > 0) {
       const hintText = "点击小火箭开启3秒爆发无敌时间";
       setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
-      const hpad = 11;
+      const hpad = 13;
       const hw = ctx.measureText(hintText).width + hpad * 2;
-      const hh = 26;
-      const hx = baseX;
-      const hy = baseY + iconSize + 9;
+      const hh = 28;
+      const hx = (CONFIG.logicalWidth - hw) / 2;
+      const hy = baseY + iconSize + 4;
 
       // 最后1秒渐隐
       const hintAlpha = this.rocketHintTimer <= 1 ? clamp(this.rocketHintTimer, 0, 1) : 1;
@@ -5048,9 +5263,9 @@ class Game {
       this.roundRect(ctx, hx, hy, hw, hh, hh / 2);
       ctx.fill();
       ctx.fillStyle = "#315f72";
-      ctx.textAlign = "left";
+      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(hintText, hx + hpad, hy + hh / 2 + 0.5);
+      ctx.fillText(hintText, CONFIG.logicalWidth / 2, hy + hh / 2 + 0.5);
 
       ctx.globalAlpha = 1;
     }
@@ -5062,10 +5277,179 @@ class Game {
           id: "rocket",
           x: baseX,
           y: baseY,
-          w: rockets * iconSize + (rockets - 1) * gap,
+          w: totalWidth,
           h: iconSize
         };
 
+    ctx.restore();
+  }
+
+  drawRocketPickupAnimation(ctx) {
+    const animation = this.rocketPickupAnimation;
+    if (!animation) {
+      return;
+    }
+
+    const rawT = clamp(animation.elapsed / animation.duration, 0, 1);
+    const easedT = easeInOutCubic(rawT);
+    const point = quadraticBezierPoint(animation.start, animation.control, animation.end, easedT);
+    ctx.save();
+
+    // 短尾迹强化方向感，同时保持画面轻盈。
+    for (let index = 5; index >= 1; index -= 1) {
+      const trailRawT = Math.max(0, rawT - index * 0.055);
+      if (trailRawT <= 0) {
+        continue;
+      }
+      const trailPoint = quadraticBezierPoint(
+        animation.start,
+        animation.control,
+        animation.end,
+        easeInOutCubic(trailRawT)
+      );
+      const trailAlpha = (1 - index / 6) * 0.34 * (1 - rawT * 0.25);
+      ctx.fillStyle = index % 2 === 0
+        ? `rgba(255, 212, 0, ${trailAlpha})`
+        : `rgba(72, 135, 219, ${trailAlpha})`;
+      ctx.beginPath();
+      ctx.arc(trailPoint.x, trailPoint.y, Math.max(2, 7 - index), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const arrivalT = clamp((rawT - 0.72) / 0.28, 0, 1);
+    if (arrivalT > 0) {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * (1 - arrivalT)})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(animation.end.x, animation.end.y, 20 + arrivalT * 24, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const iconScale = 1 + Math.sin(Math.PI * rawT) * 0.16;
+    const iconSize = 42 * iconScale;
+    const iconX = point.x - iconSize / 2;
+    const iconY = point.y - iconSize / 2;
+    const asset = this.figmaUiAssets && this.figmaUiAssets.rocket;
+    if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+      ctx.shadowColor = "rgba(255, 255, 255, 0.96)";
+      ctx.shadowBlur = 10;
+      ctx.drawImage(asset.image, iconX, iconY, iconSize, iconSize);
+      ctx.shadowColor = "rgba(72, 135, 219, 0.34)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetY = 4;
+      ctx.drawImage(asset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#4887DB";
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 5;
+      setCanvasFont(ctx, `bold ${iconSize * 0.76}px Arial`);
+      ctx.strokeText("\uD83D\uDE80", point.x, point.y);
+      ctx.fillText("\uD83D\uDE80", point.x, point.y);
+    }
+    ctx.restore();
+  }
+
+  drawPowerUpPickupAnimation(ctx) {
+    const animation = this.powerUpPickupAnimation;
+    if (!animation) {
+      return;
+    }
+
+    const rawT = clamp(animation.elapsed / animation.duration, 0, 1);
+    const moveT = easeOutCubic(rawT);
+    const point = lerpPoint(animation.start, animation.end, moveT);
+    const enterT = easeOutCubic(clamp(rawT / 0.28, 0, 1));
+    const exitT = easeInCubic(clamp((rawT - 0.64) / 0.36, 0, 1));
+    const alpha = 1 - exitT;
+    const iconScale = (0.48 + enterT * 1.42) * (1 - exitT * 0.18);
+    const iconSize = 48 * iconScale;
+    const { rgb, lightRgb } = animation.palette;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    const glowRadius = 34 + enterT * 46;
+    const glow = ctx.createRadialGradient(point.x, point.y, 4, point.x, point.y, glowRadius);
+    glow.addColorStop(0, `rgba(${lightRgb}, ${0.72 * alpha})`);
+    glow.addColorStop(0.48, `rgba(${rgb}, ${0.28 * alpha})`);
+    glow.addColorStop(1, `rgba(${rgb}, 0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    const ringT = easeOutCubic(clamp(rawT / 0.72, 0, 1));
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.9 * (1 - ringT) * alpha})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 22 + ringT * 62, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(${rgb}, ${0.72 * (1 - ringT) * alpha})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 30 + ringT * 72, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 八向闪光随图标放大弹出，强化“道具已经生效”的瞬间。
+    const sparkT = easeOutCubic(clamp(rawT / 0.55, 0, 1));
+    ctx.lineCap = "round";
+    for (let index = 0; index < 8; index += 1) {
+      const angle = index * Math.PI / 4 + rawT * 0.8;
+      const inner = 30 + sparkT * 34;
+      const outer = inner + 7 + (index % 2) * 5;
+      ctx.strokeStyle = index % 2 === 0
+        ? `rgba(255, 255, 255, ${0.86 * (1 - sparkT) * alpha})`
+        : `rgba(${rgb}, ${0.72 * (1 - sparkT) * alpha})`;
+      ctx.lineWidth = index % 2 === 0 ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(point.x + Math.cos(angle) * inner, point.y + Math.sin(angle) * inner);
+      ctx.lineTo(point.x + Math.cos(angle) * outer, point.y + Math.sin(angle) * outer);
+      ctx.stroke();
+    }
+
+    const asset = this.figmaUiAssets && this.figmaUiAssets[animation.type];
+    const iconX = point.x - iconSize / 2;
+    const iconY = point.y - iconSize / 2;
+    if (asset && asset.loaded && !asset.failed && asset.image.complete) {
+      ctx.shadowColor = "rgba(255, 255, 255, 0.98)";
+      ctx.shadowBlur = 12;
+      ctx.drawImage(asset.image, iconX, iconY, iconSize, iconSize);
+      ctx.shadowColor = `rgba(${rgb}, 0.42)`;
+      ctx.shadowBlur = 16;
+      ctx.shadowOffsetY = 4;
+      ctx.drawImage(asset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 6;
+      ctx.fillStyle = `rgb(${rgb})`;
+      setCanvasFont(ctx, `bold ${iconSize * 0.72}px Arial`);
+      const symbol = animation.type === "magnet" ? "\uD83E\uDDF2" : "\uD83D\uDD0D";
+      ctx.strokeText(symbol, point.x, point.y);
+      ctx.fillText(symbol, point.x, point.y);
+    }
+
+    const labelAlpha = clamp((rawT - 0.14) / 0.18, 0, 1) * alpha;
+    if (labelAlpha > 0) {
+      const label = `${POWER_UPS[animation.type].label} 已生效`;
+      setCanvasFont(ctx, "900 15px Arial, Helvetica, sans-serif");
+      const paddingX = 15;
+      const labelW = ctx.measureText(label).width + paddingX * 2;
+      const labelH = 32;
+      const labelX = point.x - labelW / 2;
+      const labelY = point.y + iconSize / 2 + 10;
+      ctx.globalAlpha = labelAlpha;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
+      this.roundRect(ctx, labelX, labelY, labelW, labelH, labelH / 2);
+      ctx.fill();
+      ctx.fillStyle = `rgb(${rgb})`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, point.x, labelY + labelH / 2 + 0.5);
+    }
     ctx.restore();
   }
 
@@ -5521,7 +5905,7 @@ class Game {
       }
       this.drawHold(ctx, hold, isContact, {
         useRouteAsset: hold.isFootRoute,
-        alpha: isContact ? 1 : 0.4
+        alpha: isContact ? 1 : THEME.holds.inactiveAlpha
       });
     }
   }
@@ -5531,7 +5915,7 @@ class Game {
     for (const hold of this.routeHolds) {
       const isImportant = contactIds.has(hold.id);
       this.drawHold(ctx, hold, isImportant, {
-        alpha: isImportant ? 1 : 0.4
+        alpha: isImportant ? 1 : THEME.holds.inactiveAlpha
       });
     }
   }
@@ -5608,27 +5992,31 @@ class Game {
     const glowPulse = 0.72 + Math.sin(time * 1.35) * 0.16;
     const glowRadius = ringRadius + 20 * targetScale;
     const glow = ctx.createRadialGradient(screen.x, screen.y, ringRadius * 0.42, screen.x, screen.y, glowRadius);
-    glow.addColorStop(0, `rgba(255, 239, 118, ${0.18 * glowPulse})`);
-    glow.addColorStop(0.48, `rgba(255, 221, 64, ${0.16 * glowPulse})`);
-    glow.addColorStop(1, "rgba(255, 221, 64, 0)");
+    glow.addColorStop(0, `rgba(255, 228, 48, ${0.34 * glowPulse})`);
+    glow.addColorStop(0.48, `rgba(255, 212, 0, ${0.26 * glowPulse})`);
+    glow.addColorStop(1, "rgba(255, 212, 0, 0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, glowRadius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = `rgba(255, 222, 74, ${0.28 * glowPulse})`;
-    ctx.lineWidth = 8.5;
+    // 白色底圈让黄色判定圈更轻盈，避免深色轮廓过于生硬。
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.lineWidth = 11;
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, ringRadius + 8, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, ringRadius + 6, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.96)";
-    ctx.lineWidth = 4.6;
+
+    // 高饱和黄圈覆盖在白色底圈上，保留目标提示的黄色语义。
+    ctx.strokeStyle = "rgba(255, 212, 0, 0.6)";
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, ringRadius + 6, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
     ctx.arc(screen.x, screen.y, ringRadius, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(240, 210, 92, 0.76)";
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, ringRadius + 3, 0, Math.PI * 2);
     ctx.stroke();
     this.drawDecorTicks(ctx, screen.x, screen.y, ringRadius, time);
   }
@@ -6755,7 +7143,7 @@ class Game {
       this.drawChargeBar(ctx);
     }
 
-    // 火箭图标：右上角，点击使用爆发攀爬
+    // 火箭库存：底部居中，点击使用爆发攀爬
     this.drawRocketButton(ctx);
   }
 
@@ -8391,7 +8779,10 @@ class Game {
     const w = ctx.measureText(this.uiToast).width + paddingX * 2;
     const h = 34;
     const x = (CONFIG.logicalWidth - w) / 2;
-    const y = CONFIG.logicalHeight - 220;
+    const isRocketToast = /小火箭|发射|爆发/.test(this.uiToast);
+    const y = isRocketToast
+      ? CONFIG.logicalHeight - CONFIG.safeBottom - (this.autoClimb.active ? 170 : 134)
+      : CONFIG.logicalHeight - 220;
     // 白底药丸（对齐吸铁石/放大镜样式）
     ctx.fillStyle = "rgba(255, 255, 255, 0.94)";
     this.roundRect(ctx, x, y, w, h, h / 2);
