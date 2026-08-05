@@ -2,7 +2,8 @@
 
 (function initQuwanPlatform(global) {
   const PROJECT_ID = "panlegeyan_27be";
-  const DEFAULT_ACTIVITY_ID = "activity_panlegeyan_20260721";
+  const DEFAULT_ACTIVITY_ID = "activity_panlegeyan_height_20260724";
+  const SCORE_ACTIVITY_ID = "activity_panlegeyan_score_20260724";
   const LEGACY_ACTIVITY_IDS = new Set([
     "panlegeyan_h5_20260721",
     "activity_panlegeyan_20260717"
@@ -11,7 +12,7 @@
   const QQNEWS_JSAPI_URL = "https://mat1.gtimg.com/qqcdn/tnewsh5/jsapi/1.3.8/qqnews-jsapi.min.js";
   const REPORT_SCHEMA = "panlegeyan_202607";
   const PAGE_ID = `pg_${PROJECT_ID}_game`;
-  const RANKING_SCORE_CAP = 999999;
+  const RANKING_SCORE_CAP = 999909999;
   const CUMULATIVE_RANKING = 0;
   const RANKING_SIZE = 50;
   const RANKING_TIMEOUT_MS = 8000;
@@ -52,7 +53,8 @@
     return usesCustomTitleBar() ? 60 : 40;
   }
 
-  function getActivityId() {
+  function getActivityId(override) {
+    if (override) return override;
     const requestedActivityId = getQueryParam("activityId");
     return !requestedActivityId || LEGACY_ACTIVITY_IDS.has(requestedActivityId)
       ? DEFAULT_ACTIVITY_ID
@@ -464,7 +466,24 @@
     }
   }
 
-  function normalizeRankingResult(result) {
+  // 高度榜编码：高度按分米排序；高度相同时，用时越短排名越靠前。
+  function encodeHeightScore(meters, seconds) {
+    const safeMeters = Math.max(0, Math.min(9999, Number(meters) || 0));
+    const decimeters = Math.floor(safeMeters * 10);
+    const safeSeconds = Math.max(0, Math.min(9999, Math.floor(Number(seconds) || 0)));
+    return Math.max(0, Math.min(RANKING_SCORE_CAP, decimeters * 10000 + (9999 - safeSeconds)));
+  }
+
+  function decodeHeightFromScore(score) {
+    return Math.floor(Math.max(0, Number(score) || 0) / 10000) / 10;
+  }
+
+  function decodeTimeFromScore(score) {
+    const seconds = 9999 - (Math.floor(Math.max(0, Number(score) || 0)) % 10000);
+    return seconds >= 0 && seconds <= 9999 ? seconds : -1;
+  }
+
+  function normalizeRankingResult(result, decodeHeight) {
     const data = result && result.data ? result.data : {};
     const board = Array.isArray(data.ranking_board) ? data.ranking_board : [];
     const entries = board.map((item, index) => {
@@ -474,9 +493,15 @@
         item.user_info.name
       );
       if (!nickname) return null;
+      const score = Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(item && item.ranking && item.ranking.score) || 0)));
+      const decoded = decodeHeight
+        ? { height: decodeHeightFromScore(score), time: decodeTimeFromScore(score) }
+        : { height: undefined, time: undefined };
       return {
         rank: Number(item && item.ranking && item.ranking.rank) || index + 1,
-        score: Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(item && item.ranking && item.ranking.score) || 0))),
+        score,
+        height: decoded.height,
+        time: decoded.time,
         nickname,
         userId: item && item.user_info && firstText(
           item.user_info.suid,
@@ -496,11 +521,17 @@
       .sort((a, b) => a.rank - b.rank || b.score - a.score)
       .slice(0, RANKING_SIZE);
     const bestRank = data.best_rank || {};
+    const ownScore = Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(bestRank.score) || 0)));
+    const ownDecoded = decodeHeight
+      ? { height: decodeHeightFromScore(ownScore), time: decodeTimeFromScore(ownScore) }
+      : { height: undefined, time: undefined };
     return {
       entries,
       own: {
         rank: Number(bestRank.rank) || 0,
-        score: Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(bestRank.score) || 0))),
+        score: ownScore,
+        height: ownDecoded.height,
+        time: ownDecoded.time,
         nickname: cachedUserInfo && cachedUserInfo.nickname || "我的最高记录",
         userId: cachedUserInfo && cachedUserInfo.userId || "",
         avatar: cachedUserInfo && cachedUserInfo.avatar || ""
@@ -541,7 +572,7 @@
     }
   }
 
-  async function postRanking(path, body) {
+  async function postRanking(path, body, decodeHeight) {
     const response = await fetchWithTimeout(`${getRankingApiBase()}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -561,10 +592,10 @@
       requestError.code = Number(result && (result.code ?? result.ret)) || 0;
       throw requestError;
     }
-    return normalizeRankingResult(result);
+    return normalizeRankingResult(result, decodeHeight);
   }
 
-  async function getRankingBoard() {
+  async function getRankingBoard(activityId, decodeHeight) {
     if (isLocalPreview()) {
       return { success: true, localPreview: true, data: { entries: [], own: null } };
     }
@@ -572,10 +603,10 @@
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const data = await postRanking("/activity/ranking_board", {
-          activityId: getActivityId(),
+          activityId: getActivityId(activityId),
           cumulativeRanking: CUMULATIVE_RANKING,
           rankingSize: RANKING_SIZE
-        });
+        }, decodeHeight);
         reportEvent("ranking_load_success", { count: data.entries.length, retry_count: attempt });
         return { success: true, data };
       } catch (error) {
@@ -598,7 +629,7 @@
     return { success: false, error: lastError && lastError.message || "排行榜加载失败" };
   }
 
-  async function submitScore(score) {
+  async function submitScore(score, activityId, decodeHeight) {
     if (isLocalPreview()) {
       return { success: true, localPreview: true, data: { entries: [], own: null } };
     }
@@ -606,16 +637,16 @@
     if (!loginResult.success) return loginResult;
     const bknSign = await getBknSign();
     if (!bknSign) return { success: false, error: "未读取到登录签名，请重新登录" };
-    // 排行榜平台只接受 0~999999 的整数分值；不要把高度/用时打包进 score。
+    // 高度榜 score 由 encodeHeightScore 生成，平台仅接受整数。
     const safeScore = Math.min(RANKING_SCORE_CAP, Math.max(0, Math.floor(Number(score) || 0)));
     try {
       const data = await postRanking("/activity/ranking", {
-        activityId: getActivityId(),
+        activityId: getActivityId(activityId),
         cumulativeRanking: CUMULATIVE_RANKING,
         rankingSize: RANKING_SIZE,
         score: safeScore,
         bknSign
-      });
+      }, decodeHeight);
       reportEvent("ranking_submit_success", {
         score: safeScore,
         rank: data.own && data.own.rank || 0
@@ -683,6 +714,7 @@
   global.QuwanPlatform = Object.freeze({
     PROJECT_ID,
     ACTIVITY_ID: DEFAULT_ACTIVITY_ID,
+    SCORE_ACTIVITY_ID,
     RANKING_SCORE_CAP,
     PAGE_ID,
     init,
@@ -698,8 +730,12 @@
     ensureLogin,
     getCurrentUser,
     isLoggedIn,
+    getActivityId,
     getRankingBoard,
     submitScore,
+    encodeHeightScore,
+    decodeHeightFromScore,
+    decodeTimeFromScore,
     closePage,
     disableGestureQuit
   });

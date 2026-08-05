@@ -1,0 +1,253 @@
+{
+  "schemaVersion": "1.0",
+  "themeId": "theme07",
+  "themeName": "theme07",
+  "description": "Climbing hold asset database. Each hold keeps original visual size, collision outline and normalized grip positions.",
+  "coordinateSystem": {
+    "x": "0-1 normalized by hold native width",
+    "y": "0-1 normalized by hold native height",
+    "origin": "top-left"
+  },
+  "holds": [
+    {
+      "id": "theme07_hold_001",
+      "image": "images/theme07_hold_001.png",
+      "outline": "outlines/theme07_hold_001.svg",
+      "grip": "grip/theme07_hold_001.svg",
+      "nativeSize": {
+        "width": 142,
+        "height": 237
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.54225,
+          "y": 0.48101,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_002",
+      "image": "images/theme07_hold_002.png",
+      "outline": "outlines/theme07_hold_002.svg",
+      "grip": "grip/theme07_hold_002.svg",
+      "nativeSize": {
+        "width": 211,
+        "height": 359
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.69194,
+          "y": 0.57382,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_003",
+      "image": "images/theme07_hold_003.png",
+      "outline": "outlines/theme07_hold_003.svg",
+      "grip": "grip/theme07_hold_003.svg",
+      "nativeSize": {
+        "width": 279,
+        "height": 278
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.19355,
+          "y": 0.52518,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_004",
+      "image": "images/theme07_hold_004.png",
+      "outline": "outlines/theme07_hold_004.svg",
+      "grip": "grip/theme07_hold_004.svg",
+      "nativeSize": {
+        "width": 311,
+        "height": 154
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.45981,
+          "y": 0.45455,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_005",
+      "image": "images/theme07_hold_005.png",
+      "outline": "outlines/theme07_hold_005.svg",
+      "grip": "grip/theme07_hold_005.svg",
+      "nativeSize": {
+        "width": 130,
+        "height": 165
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.5,
+          "y": 0.34545,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_006",
+      "image": "images/theme07_hold_006.png",
+      "outline": "outlines/theme07_hold_006.svg",
+      "grip": "grip/theme07_hold_006.svg",
+      "nativeSize": {
+        "width": 138,
+        "height": 111
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.57971,
+          "y": 0.48649,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_007",
+      "image": "images/theme07_hold_007.png",
+      "outline": "outlines/theme07_hold_007.svg",
+      "grip": "grip/theme07_hold_007.svg",
+      "nativeSize": {
+        "width": 334,
+        "height": 315
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.52096,
+          "y": 0.28254,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_008",
+      "image": "images/theme07_hold_008.png",
+      "outline": "outlines/theme07_hold_008.svg",
+      "grip": "grip/theme07_hold_008.svg",
+      "nativeSize": {
+        "width": 307,
+        "height": 474
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.50163,
+          "y": 0.38608,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_009",
+      "image": "images/theme07_hold_009.png",
+      "outline": "outlines/theme07_hold_009.svg",
+      "grip": "grip/theme07_hold_009.svg",
+      "nativeSize": {
+        "width": 275,
+        "height": 282
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.14545,
+          "y": 0.44681,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_010",
+      "image": "images/theme07_hold_010.png",
+      "outline": "outlines/theme07_hold_010.svg",
+      "grip": "grip/theme07_hold_010.svg",
+      "nativeSize": {
+        "width": 262,
+        "height": 245
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.8626,
+          "y": 0.53061,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_011",
+      "image": "images/theme07_hold_011.png",
+      "outline": "outlines/theme07_hold_011.svg",
+      "grip": "grip/theme07_hold_011.svg",
+      "nativeSize": {
+        "width": 268,
+        "height": 254
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.09701,
+          "y": 0.26378,
+          "type": "primary"
+        }
+      ]
+    },
+    {
+      "id": "theme07_hold_012",
+      "image": "images/theme07_hold_012.png",
+      "outline": "outlines/theme07_hold_012.svg",
+      "grip": "grip/theme07_hold_012.svg",
+      "nativeSize": {
+        "width": 247,
+        "height": 265
+      },
+      "type": "unknown",
+      "difficulty": null,
+      "tags": [],
+      "grips": [
+        {
+          "x": 0.49393,
+          "y": 0.81132,
+          "type": "primary"
+        }
+      ]
+    }
+  ]
+}

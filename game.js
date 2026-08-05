@@ -46,7 +46,10 @@ const CONFIG = {
   footMinSeparation: 42,
   themeHoldScale: 0.32,
   themeHoldRotationMax: Math.PI / 6,
-  themeHoldCollisionPadding: 4,
+  // 岩点以实际轮廓的外接范围预留间距；大岩点会再按尺寸追加缓冲，避免视觉上相贴或压住。
+  themeHoldCollisionPadding: 10,
+  themeHoldLargeCollisionThreshold: 76,
+  themeHoldLargeCollisionExtra: 14,
   themeHoldWallBleed: 24,
 
   // ===================== IK 骨骼尺寸（换图时永远不要改） =====================
@@ -295,7 +298,8 @@ const HOLD_THEME_ASSET_SETS = [
   { id: "theme03", basePath: gameAssetUrl("hold_themes/theme03"), manifestFile: gameAssetUrl("hold_themes/theme03/theme03_holds_manifest.json") },
   { id: "theme04", basePath: gameAssetUrl("hold_themes/theme04"), manifestFile: gameAssetUrl("hold_themes/theme04/theme04_holds_manifest.json") },
   { id: "theme05", basePath: gameAssetUrl("hold_themes/theme05"), manifestFile: gameAssetUrl("hold_themes/theme05/theme05_holds_manifest.json") },
-  { id: "theme06", basePath: gameAssetUrl("hold_themes/theme06"), manifestFile: gameAssetUrl("hold_themes/theme06/theme06_holds_manifest.json") }
+  { id: "theme06", basePath: gameAssetUrl("hold_themes/theme06"), manifestFile: gameAssetUrl("hold_themes/theme06/theme06_holds_manifest.json") },
+  { id: "theme07", basePath: gameAssetUrl("hold_themes/theme07"), manifestFile: gameAssetUrl("hold_themes/theme07/theme07_holds_manifest.json") }
 ];
 const PLAYER_ASSET_FILES = resolveGameAssetMap({
   fallingPose: "player/falling_pose.png",
@@ -497,6 +501,23 @@ function easeInOutCubic(t) {
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// 单次成功抓点获得的攀爬高度（单位：米）。
+// 这是全局唯一的高度口径：HUD 高度、结算高度、排行榜高度、左侧刻度全部基于它，
+// 不允许再出现「按世界像素 / pixelsPerMeter 换算高度」的第二套口径。
+function climbHeightGainMetersForDistance(targetDistance) {
+  const distanceValue = Number(targetDistance);
+  if (!Number.isFinite(distanceValue) || distanceValue < 0) {
+    return 0;
+  }
+  if (distanceValue <= CONFIG.heightNearDistanceMax) {
+    return CONFIG.heightNearGainMeters;
+  }
+  if (distanceValue <= CONFIG.heightNormalDistanceMax) {
+    return CONFIG.heightNormalGainMeters;
+  }
+  return CONFIG.heightFarGainMeters;
 }
 
 function normalize(vector) {
@@ -780,6 +801,7 @@ class ScoreManager {
   constructor() {
     this.storageKey = "ropeClimbJumpBestScore";
     this.rankingsKey = "ropeClimbJumpRankings";
+    this.heightLeaderboardEligibilityKey = "ropeClimbJumpHeightBoardEligibleV1";
     this.best = this.loadBestScore();
     this.rankings = this.loadRankings();
   }
@@ -871,6 +893,30 @@ class ScoreManager {
       // Storage can be disabled; gameplay should continue without records.
     }
     return changed;
+  }
+
+  isHeightLeaderboardEligible() {
+    try {
+      return window.localStorage.getItem(this.heightLeaderboardEligibilityKey) === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  markHeightLeaderboardEligible() {
+    try {
+      window.localStorage.setItem(this.heightLeaderboardEligibilityKey, "1");
+    } catch (error) {
+      // Storage can be disabled; the current round can still be submitted.
+    }
+  }
+
+  getBestHeightRecord(fallbackRecord = null) {
+    const candidates = [this.best, ...(this.rankings && this.rankings.height || []), fallbackRecord]
+      .filter(Boolean)
+      .map((record) => this.normalizeRecord(record));
+    return candidates.sort((a, b) => b.height - a.height || b.score - a.score || a.duration - b.duration)[0]
+      || this.normalizeRecord(fallbackRecord || {});
   }
 }
 
@@ -1241,6 +1287,7 @@ class HoldGenerator {
     this.lastPowerUpSequence = -CONFIG.powerUpMinGap;
     const startHold = this.createRouteHold(startX, startY, 0);
     startHold.state = "current";
+    startHold.climbMeters = 0;
     this.routeHolds.push(startHold);
     this.generateSupportHoldsAround(startHold);
     while (this.routeHolds.length < CONFIG.initialHoldCount) {
@@ -1355,7 +1402,18 @@ class HoldGenerator {
       if (hold.id === candidate.id) {
         continue;
       }
-      if (polygonsIntersect(candidate.outlineWorld, hold.outlineWorld, CONFIG.themeHoldCollisionPadding)) {
+      const candidateBounds = candidate.outlineBounds || getPolygonBounds(candidate.outlineWorld);
+      const holdBounds = hold.outlineBounds || getPolygonBounds(hold.outlineWorld);
+      const candidateSize = Math.max(candidateBounds.maxX - candidateBounds.minX, candidateBounds.maxY - candidateBounds.minY);
+      const holdSize = Math.max(holdBounds.maxX - holdBounds.minX, holdBounds.maxY - holdBounds.minY);
+      const largestSize = Math.max(candidateSize, holdSize);
+      const largeHoldPadding = Math.max(0, largestSize - CONFIG.themeHoldLargeCollisionThreshold)
+        / CONFIG.themeHoldLargeCollisionThreshold * CONFIG.themeHoldLargeCollisionExtra;
+      const padding = CONFIG.themeHoldCollisionPadding + largeHoldPadding;
+
+      // 轮廓可能存在凹角；仅依赖多边形 SAT 会让两个视觉外接范围相交的岩点漏检。
+      // 这里把外接范围也作为硬约束，保证任何可见岩点之间都有安全间距。
+      if (boundsOverlap(candidateBounds, holdBounds, padding)) {
         return true;
       }
     }
@@ -1382,9 +1440,18 @@ class HoldGenerator {
     return { min: 90, max: 232, verticalMin: 86, verticalMax: 220 };
   }
 
+  // 把新岩点接到高度链上：hold.climbMeters = 上一个岩点的累计高度 + 本次抓点的档位增益。
+  // 这样「路线岩点 → 累计高度」的映射在岩点生成时就已确定，左侧刻度可以直接沿用，
+  // 不会和玩家实际拿到的 climbHeight 产生偏差。
+  linkClimbMeters(previousHold, hold) {
+    const baseMeters = previousHold && Number.isFinite(previousHold.climbMeters) ? previousHold.climbMeters : 0;
+    hold.climbMeters = baseMeters + climbHeightGainMetersForDistance(distance(previousHold, hold));
+    return hold;
+  }
+
   generateNextHold(previousHold, sequence) {
     const band = this.getDistanceBand(sequence);
-    for (let attempt = 0; attempt < 80; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       const verticalGap = lerp(band.verticalMin, band.verticalMax, Math.random());
       const maxDxByBand = Math.sqrt(Math.max(0, band.max * band.max - verticalGap * verticalGap));
       const dx = lerp(-maxDxByBand, maxDxByBand, Math.random());
@@ -1393,7 +1460,7 @@ class HoldGenerator {
       const hold = this.createRouteHold(x, y, sequence);
       if (this.isHoldReachable(previousHold, hold, band.min, band.max) && this.isCandidateClear(hold)) {
         hold.powerUp = this.choosePowerUp(sequence);
-        return hold;
+        return this.linkClimbMeters(previousHold, hold);
       }
     }
 
@@ -1403,21 +1470,31 @@ class HoldGenerator {
     const direction = previousHold.x > CONFIG.logicalWidth / 2 ? -1 : 1;
     const x = clamp(previousHold.x + direction * horizontal, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding);
     const y = previousHold.y - verticalGap;
-    for (let attempt = 0; attempt < 32; attempt += 1) {
+    for (let attempt = 0; attempt < 128; attempt += 1) {
       const jitterX = attempt === 0 ? 0 : lerp(-36, 36, Math.random());
       const hold = this.createRouteHold(
         clamp(x + jitterX, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding),
         y - attempt * 4,
         sequence
       );
-      if (this.isCandidateClear(hold)) {
+      if (this.isHoldReachable(previousHold, hold, band.min, band.max) && this.isCandidateClear(hold)) {
         hold.powerUp = this.choosePowerUp(sequence);
-        return hold;
+        return this.linkClimbMeters(previousHold, hold);
       }
     }
-    const fallback = this.createRouteHold(x, y, sequence);
-    fallback.powerUp = this.choosePowerUp(sequence);
-    return fallback;
+
+    // 最后采用网格搜索，但绝不绕过碰撞校验。理论上仅在极端密集场景触发。
+    for (let verticalGap = band.verticalMin; verticalGap <= band.verticalMax; verticalGap += 8) {
+      for (let candidateX = CONFIG.wallPadding; candidateX <= CONFIG.logicalWidth - CONFIG.wallPadding; candidateX += 18) {
+        const hold = this.createRouteHold(candidateX, previousHold.y - verticalGap, sequence);
+        if (this.isHoldReachable(previousHold, hold, band.min, band.max) && this.isCandidateClear(hold)) {
+          hold.powerUp = this.choosePowerUp(sequence);
+          return this.linkClimbMeters(previousHold, hold);
+        }
+      }
+    }
+
+    throw new Error("Unable to generate a collision-free route hold");
   }
 
   generateSupportHoldsAround(routeHold) {
@@ -1499,15 +1576,23 @@ class HoldGenerator {
   }
 
   createFallbackSupport(point, routeId) {
-    const hold = this.createSupportHold(
-      clamp(point.x, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding),
-      point.y,
-      routeId,
-      false,
-      true
-    );
-    this.supportHolds.push(hold);
-    return hold;
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+      const ring = Math.floor(attempt / 8);
+      const angle = (attempt % 8) / 8 * Math.PI * 2;
+      const offset = ring * 14;
+      const hold = this.createSupportHold(
+        clamp(point.x + Math.cos(angle) * offset, CONFIG.wallPadding, CONFIG.logicalWidth - CONFIG.wallPadding),
+        point.y + Math.sin(angle) * offset,
+        routeId,
+        false,
+        true
+      );
+      if (this.isCandidateClear(hold)) {
+        this.supportHolds.push(hold);
+        return hold;
+      }
+    }
+    return null;
   }
 }
 
@@ -2683,12 +2768,11 @@ class Game {
     this.uiPanel = null;
     this.uiToast = null;
     this.uiToastTime = 0;
-    this.remoteLeaderboard = {
-      status: "idle",
-      entries: [],
-      own: null,
-      error: ""
+    this.remoteLeaderboards = {
+      height: { status: "idle", entries: [], own: null, error: "" },
+      score: { status: "idle", entries: [], own: null, error: "" }
     };
+    this.leaderboardTab = "score";
     this.loggedInUser = QUWAN_PLATFORM && typeof QUWAN_PLATFORM.getCurrentUser === "function"
       ? QUWAN_PLATFORM.getCurrentUser()
       : null;
@@ -3469,14 +3553,14 @@ class Game {
         if (this.quitButtonRect && this.pointInRect(point, this.quitButtonRect)) {
           this.gameOverStage = "ranking";
           this.resetLeaderboardScroll();
-          void this.loadRemoteLeaderboard(true);
+          void this.submitBothLeaderboards();
           this.state = STATE.GAME_OVER;
           return;
         }
         // 点击弹窗其它区域：进入排行榜（原默认行为）
         this.gameOverStage = "ranking";
         this.resetLeaderboardScroll();
-        void this.loadRemoteLeaderboard(true);
+        void this.submitBothLeaderboards();
       }
       this.state = STATE.GAME_OVER;
       return;
@@ -3678,6 +3762,14 @@ class Game {
     }
     if (id === "open-news-app") {
       this.triggerAppLaunchForRanking();
+      return true;
+    }
+    if (id === "leaderboard-tab-score") {
+      this.switchLeaderboardTab("score");
+      return true;
+    }
+    if (id === "leaderboard-tab-height") {
+      this.switchLeaderboardTab("height");
       return true;
     }
   }
@@ -3918,17 +4010,7 @@ class Game {
   }
 
   getClimbHeightGainForDistance(targetDistance) {
-    const distanceValue = Number(targetDistance);
-    if (!Number.isFinite(distanceValue) || distanceValue < 0) {
-      return 0;
-    }
-    if (distanceValue <= CONFIG.heightNearDistanceMax) {
-      return CONFIG.heightNearGainMeters * CONFIG.pixelsPerMeter;
-    }
-    if (distanceValue <= CONFIG.heightNormalDistanceMax) {
-      return CONFIG.heightNormalGainMeters * CONFIG.pixelsPerMeter;
-    }
-    return CONFIG.heightFarGainMeters * CONFIG.pixelsPerMeter;
+    return climbHeightGainMetersForDistance(targetDistance) * CONFIG.pixelsPerMeter;
   }
 
   addClimbHeightForDistance(targetDistance) {
@@ -4717,6 +4799,8 @@ class Game {
       score: this.score,
       duration: this.finalRoundDuration
     });
+    // 只有完成更新后的首局，才允许把本机历史最高高度补写到高度榜。
+    this.scoreManager.markHeightLeaderboardEligible();
     reportQuwanEvent("game_over", {
       score: this.score,
       holds: this.holdCount,
@@ -4724,8 +4808,8 @@ class Game {
       duration_ms: Math.round(this.finalRoundDuration * 1000),
       reason: this.failureReason || ""
     });
-    // 预加载排行榜，供“本轮成绩”弹窗展示“还差几分超越上一名”提示（不提交分数、不触发登录）
-    void this.loadRemoteLeaderboard(false);
+    // 预加载得分榜，供“本轮成绩”弹窗比较本轮得分与上一名（不提交分数、不触发登录）。
+    void this.loadRemoteLeaderboard("score", false);
     // 结算弹窗出现即预加载激励广告，用户点击“还想再爬”时可直接拉起展示，减少等待。
     if (!this.reviveUsed) {
       const ad = window.qqNewsRewardedAd;
@@ -4736,7 +4820,7 @@ class Game {
   }
 
   getReviveGapHint() {
-    const data = this.getLeaderboardData();
+    const data = this.getLeaderboardData("score");
     if (!data || !Array.isArray(data.rows) || data.rows.length === 0) return null;
 
     const currentScore = Math.max(0, Math.floor(Number(this.score) || 0));
@@ -4749,7 +4833,7 @@ class Game {
       const scoreDiff = b.score - a.score;
       if (scoreDiff !== 0) return scoreDiff;
       if (a.isCurrentRound === b.isCurrentRound) return (a.rank || 0) - (b.rank || 0);
-      // 同分时将本轮成绩排在已有记录之后，保证“超越”必须至少多 1 分。
+      // 同分时将本轮成绩排在已有记录之后，超过上一名至少多 1 分。
       return a.isCurrentRound ? 1 : -1;
     });
     const currentIndex = ranked.findIndex((row) => row.isCurrentRound);
@@ -4759,7 +4843,7 @@ class Game {
       const previous = ranked[currentIndex - 1];
       return {
         type: "previous",
-        gap: Math.max(1, previous.score - currentScore + 1),
+        gap: Math.max(1, Math.ceil(previous.score - currentScore + 1)),
         rank: Number(previous.rank) || currentIndex
       };
     }
@@ -4767,7 +4851,7 @@ class Game {
     const cutoff = top50[49];
     return {
       type: "cutoff",
-      gap: Math.max(1, cutoff.score - currentScore + 1),
+      gap: Math.max(1, Math.ceil(cutoff.score - currentScore + 1)),
       rank: 50
     };
   }
@@ -5784,6 +5868,21 @@ class Game {
         texture: "rgba(170, 139, 78, 0.06)"
       };
     }
+    if (themeId === "theme07") {
+      return {
+        ...THEME.wall,
+        base: "#7d8ca0",
+        light: "#b7b1b0",
+        mid: "#7d8ca0",
+        blue: "#233e5e",
+        deepBlue: "#535353",
+        pink: "#b7b1b0",
+        seam: "rgba(32, 32, 32, 0.48)",
+        bolt: "rgba(32, 32, 32, 0.34)",
+        boltHighlight: "rgba(255, 255, 255, 0.22)",
+        texture: "rgba(32, 32, 32, 0.10)"
+      };
+    }
     return {
       ...THEME.wall,
       boltHighlight: "rgba(255, 255, 255, 0.58)",
@@ -5800,42 +5899,144 @@ class Game {
     this.drawHeightScale(ctx);
   }
 
+  // ===================== 左侧高度刻度 =====================
+  // 攀爬高度不是「世界像素 / pixelsPerMeter」，而是每次成功抓点按距离档位累计（0.3/0.5/0.7 米）。
+  // 因此刻度不能按世界坐标线性画，否则会比 HUD 上的真实高度快 3 倍左右。
+  // 正确做法：以路线岩点的 climbMeters 作为锚点做分段插值，让刻度和 HUD 高度严格对齐。
+  getHeightScaleAnchors() {
+    const holds = Array.isArray(this.routeHolds) ? this.routeHolds : [];
+    const anchors = [];
+    for (const hold of holds) {
+      if (!hold || !Number.isFinite(hold.climbMeters) || !Number.isFinite(hold.y)) {
+        continue;
+      }
+      const worldY = hold.y + CONFIG.playerBodyOffsetY;
+      const last = anchors[anchors.length - 1];
+      // 锚点必须严格单调（米数递增、worldY 递减），否则插值会出现回折
+      if (last && (hold.climbMeters <= last.meters || worldY >= last.worldY)) {
+        continue;
+      }
+      anchors.push({ meters: hold.climbMeters, worldY });
+    }
+    return anchors;
+  }
+
+  getHeightScaleFallbackRatio(anchors) {
+    // 锚点范围外的外推比例：整段路线的平均「像素 / 米」
+    const first = anchors[0];
+    const last = anchors[anchors.length - 1];
+    const meterSpan = last.meters - first.meters;
+    if (meterSpan > 0.0001) {
+      const ratio = (first.worldY - last.worldY) / meterSpan;
+      if (Number.isFinite(ratio) && ratio > 1) {
+        return ratio;
+      }
+    }
+    return CONFIG.pixelsPerMeter * 3;
+  }
+
+  heightScaleWorldYForMeters(meters, anchors, ratio) {
+    const first = anchors[0];
+    const last = anchors[anchors.length - 1];
+    if (meters <= first.meters) {
+      return first.worldY + (first.meters - meters) * ratio;
+    }
+    if (meters >= last.meters) {
+      return last.worldY - (meters - last.meters) * ratio;
+    }
+    for (let i = 0; i < anchors.length - 1; i += 1) {
+      const a = anchors[i];
+      const b = anchors[i + 1];
+      if (meters >= a.meters && meters <= b.meters) {
+        const t = (meters - a.meters) / Math.max(0.0001, b.meters - a.meters);
+        return a.worldY + (b.worldY - a.worldY) * t;
+      }
+    }
+    return last.worldY;
+  }
+
+  heightScaleMetersForWorldY(worldY, anchors, ratio) {
+    const first = anchors[0];
+    const last = anchors[anchors.length - 1];
+    if (worldY >= first.worldY) {
+      return first.meters - (worldY - first.worldY) / ratio;
+    }
+    if (worldY <= last.worldY) {
+      return last.meters + (last.worldY - worldY) / ratio;
+    }
+    for (let i = 0; i < anchors.length - 1; i += 1) {
+      const a = anchors[i];
+      const b = anchors[i + 1];
+      if (worldY <= a.worldY && worldY >= b.worldY) {
+        const t = (a.worldY - worldY) / Math.max(0.0001, a.worldY - b.worldY);
+        return a.meters + (b.meters - a.meters) * t;
+      }
+    }
+    return last.meters;
+  }
+
   drawHeightScale(ctx) {
-    const startY = this.player.startWorldY;
     const visibleTop = this.camera.y - 70;
     const visibleBottom = this.camera.y + CONFIG.logicalHeight + 70;
-    const halfMeter = CONFIG.pixelsPerMeter / 2;
-    const minHalfStep = Math.max(0, Math.ceil((startY - visibleBottom) / halfMeter));
-    const maxHalfStep = Math.max(0, Math.floor((startY - visibleTop) / halfMeter));
+    const anchors = this.getHeightScaleAnchors();
     const x = 0;
     const scaleColor = "rgba(255, 255, 255, 0.80)";
+    const tickLength = 16;
+    const marks = [];
+
+    if (anchors.length >= 2) {
+      const ratio = this.getHeightScaleFallbackRatio(anchors);
+      // 0.1 米一根小刻度，0.5 米一根大刻度并标数字（与 HUD 的一位小数口径一致）
+      const bottomMeters = this.heightScaleMetersForWorldY(visibleBottom, anchors, ratio);
+      const topMeters = this.heightScaleMetersForWorldY(visibleTop, anchors, ratio);
+      const minTenth = Math.max(0, Math.ceil(bottomMeters * 10 - 0.0001));
+      const maxTenth = Math.floor(topMeters * 10 + 0.0001);
+      for (let tenth = minTenth; tenth <= maxTenth; tenth += 1) {
+        const meters = tenth / 10;
+        marks.push({
+          meters,
+          worldY: this.heightScaleWorldYForMeters(meters, anchors, ratio),
+          isMajor: tenth % 5 === 0
+        });
+      }
+    } else {
+      // 兜底：还没有可用岩点锚点时（极早期帧）按旧的线性刻度画，避免空白
+      const startY = this.player.startWorldY;
+      const halfMeter = CONFIG.pixelsPerMeter / 2;
+      const minHalfStep = Math.max(0, Math.ceil((startY - visibleBottom) / halfMeter));
+      const maxHalfStep = Math.max(0, Math.floor((startY - visibleTop) / halfMeter));
+      for (let halfStep = minHalfStep; halfStep <= maxHalfStep; halfStep += 1) {
+        const meters = halfStep / 2;
+        marks.push({
+          meters,
+          worldY: startY - meters * CONFIG.pixelsPerMeter,
+          isMajor: halfStep % 2 === 0
+        });
+      }
+    }
 
     ctx.save();
     ctx.strokeStyle = scaleColor;
     ctx.fillStyle = scaleColor;
     ctx.lineCap = "butt";
 
-    for (let halfStep = minHalfStep; halfStep <= maxHalfStep; halfStep += 1) {
-      const meters = halfStep / 2;
-      const isMajor = halfStep % 2 === 0;
-      const worldY = startY - meters * CONFIG.pixelsPerMeter;
-      const y = worldY - this.camera.y;
+    for (const mark of marks) {
+      const y = mark.worldY - this.camera.y;
       if (y < -24 || y > CONFIG.logicalHeight + 24) {
         continue;
       }
 
-      const tickLength = 16;
-      ctx.lineWidth = isMajor ? 6.3 : 2.6;
+      ctx.lineWidth = mark.isMajor ? 6.3 : 2.6;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + tickLength, y);
       ctx.stroke();
 
-      if (isMajor) {
+      if (mark.isMajor) {
         setCanvasFont(ctx, "bold 18px Arial, Helvetica, sans-serif");
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(`${Math.round(meters)} m`, x + tickLength + 7, y);
+        ctx.fillText(formatMeters(mark.meters), x + tickLength + 7, y);
       }
     }
     ctx.restore();
@@ -7998,11 +8199,15 @@ class Game {
 
   async openRankingWithLogin() {
     if (!QUWAN_PLATFORM) {
-      this.remoteLeaderboard = { status: "error", entries: [], own: null, error: "平台能力未加载" };
+      this.remoteLeaderboards = {
+        height: { status: "error", entries: [], own: null, error: "平台能力未加载" },
+        score: { status: "error", entries: [], own: null, error: "平台能力未加载" }
+      };
       return;
     }
     if (QUWAN_PLATFORM.isQQNews()) {
-      this.remoteLeaderboard = { status: "loading", entries: [], own: null, error: "正在登录…" };
+      this.remoteLeaderboards.height = { status: "loading", entries: [], own: null, error: "正在登录…" };
+      this.remoteLeaderboards.score = { status: "loading", entries: [], own: null, error: "正在登录…" };
       this.loggedInUser = QUWAN_PLATFORM.getCurrentUser();
       if (!this.loggedInUser) {
         const loginResult = await QUWAN_PLATFORM.ensureLogin();
@@ -8018,11 +8223,9 @@ class Game {
       }
     } else {
       // 端外：提示打开腾讯新闻并拉端
-      this.remoteLeaderboard = {
-        status: "needApp",
-        entries: [],
-        own: null,
-        error: "登录腾讯新闻，查看完整排行榜"
+      this.remoteLeaderboards = {
+        height: { status: "needApp", entries: [], own: null, error: "登录腾讯新闻，查看完整排行榜" },
+        score: { status: "needApp", entries: [], own: null, error: "登录腾讯新闻，查看完整排行榜" }
       };
       this.triggerAppLaunchForRanking();
       return;
@@ -8030,7 +8233,12 @@ class Game {
     const bestRecord = this.scoreManager.best;
     const bestScore = Math.max(0, Math.floor(Number(bestRecord.score) || 0));
     const shouldInitializeRanking = Boolean(this.loggedInUser && bestScore > 0);
-    await this.loadRemoteLeaderboard(shouldInitializeRanking, bestRecord);
+    const canSubmitHeightRecord = this.scoreManager.isHeightLeaderboardEligible();
+    if (shouldInitializeRanking && canSubmitHeightRecord) {
+      await this.submitBothLeaderboards(bestRecord);
+    } else {
+      await this.loadRemoteLeaderboard(this.leaderboardTab, false, bestRecord);
+    }
   }
 
   triggerAppLaunchForRanking() {
@@ -8042,7 +8250,10 @@ class Game {
     }
   }
 
-  async loadRemoteLeaderboard(submitCurrentScore, recordOverride = null) {
+  async loadRemoteLeaderboard(board, submitCurrentScore, recordOverride = null) {
+    const isHeight = board === "height";
+    const activityId = isHeight ? QUWAN_PLATFORM.ACTIVITY_ID : QUWAN_PLATFORM.SCORE_ACTIVITY_ID;
+    const store = this.remoteLeaderboards[board];
     const record = recordOverride && typeof recordOverride === "object"
       ? recordOverride
       : {
@@ -8050,25 +8261,29 @@ class Game {
           height: this.climbHeight,
           duration: this.roundEnded ? this.finalRoundDuration : this.roundElapsed
         };
-    const scoreToSubmit = submitCurrentScore
-      ? Math.max(0, Math.floor(Number(record.score) || 0))
-      : 0;
-    const heightToSubmit = Math.max(0, Number(record.height) || 0) / CONFIG.pixelsPerMeter;
+    const heightMetersToSubmit = Math.max(0, Math.min(9999, (Number(record.height) || 0) / CONFIG.pixelsPerMeter));
     const durationToSubmit = Math.max(0, Number(record.duration) || 0);
-    this.remoteLeaderboard = {
-      status: "loading",
-      entries: [],
-      own: this.createLoggedInOwnRanking(),
-      error: ""
-    };
+    const scoreToSubmit = submitCurrentScore
+      ? (isHeight && QUWAN_PLATFORM && typeof QUWAN_PLATFORM.encodeHeightScore === "function"
+        ? QUWAN_PLATFORM.encodeHeightScore(heightMetersToSubmit, durationToSubmit)
+        : Math.max(0, Math.floor(Number(record.score) || 0)))
+      : 0;
+    store.status = "loading";
+    store.entries = [];
+    store.own = this.createLoggedInOwnRanking();
+    store.error = "";
     reportQuwanEvent("ranking_request", {
+      board,
       submit_score: submitCurrentScore ? 1 : 0,
       score: scoreToSubmit,
-      height: Math.round(heightToSubmit * 10) / 10,
+      height: Math.round(heightMetersToSubmit * 10) / 10,
       duration: Math.round(durationToSubmit)
     });
     if (!QUWAN_PLATFORM) {
-      this.remoteLeaderboard = { status: "error", entries: [], own: null, error: "平台能力未加载" };
+      store.status = "error";
+      store.entries = [];
+      store.own = null;
+      store.error = "平台能力未加载";
       return;
     }
     let loggedIn = typeof QUWAN_PLATFORM.isLoggedIn === "function" && QUWAN_PLATFORM.isLoggedIn();
@@ -8089,35 +8304,46 @@ class Game {
       reportQuwanEvent("ranking_submit_skipped", { reason: "guest" });
     }
     const result = shouldSubmitScore
-      ? await QUWAN_PLATFORM.submitScore(scoreToSubmit)
-      : await QUWAN_PLATFORM.getRankingBoard();
+      ? await QUWAN_PLATFORM.submitScore(scoreToSubmit, activityId, isHeight)
+      : await QUWAN_PLATFORM.getRankingBoard(activityId, isHeight);
     if (result.localPreview) {
-      this.remoteLeaderboard = {
-        status: "local",
-        entries: [],
-        own: this.createLoggedInOwnRanking(),
-        error: "本地预览不会请求正式排行榜"
-      };
+      store.status = "local";
+      store.entries = [];
+      store.own = this.createLoggedInOwnRanking();
+      store.error = "本地预览不会请求正式排行榜";
       return;
     }
     if (!result.success) {
-      this.remoteLeaderboard = {
-        status: "error",
-        entries: [],
-        own: this.createLoggedInOwnRanking(),
-        error: result.error || "排行榜加载失败"
-      };
+      store.status = "error";
+      store.entries = [];
+      store.own = this.createLoggedInOwnRanking();
+      store.error = result.error || "排行榜加载失败";
       this.showToast(this.guestRankingMode
         ? "未登录，成绩不会计入排行榜"
-        : this.remoteLeaderboard.error);
+        : store.error);
       return;
     }
-    this.remoteLeaderboard = {
-      status: "ready",
-      entries: result.data && result.data.entries || [],
-      own: this.guestRankingMode ? null : result.data && result.data.own || this.createLoggedInOwnRanking(),
-      error: ""
-    };
+    store.status = "ready";
+    store.entries = result.data && result.data.entries || [];
+    store.own = this.guestRankingMode ? null : result.data && result.data.own || this.createLoggedInOwnRanking();
+    store.error = "";
+  }
+
+  async submitBothLeaderboards(recordOverride = null) {
+    const scoreRecord = recordOverride && typeof recordOverride === "object" ? recordOverride : this.scoreManager.best;
+    const heightRecord = this.scoreManager.getBestHeightRecord(scoreRecord);
+    await this.loadRemoteLeaderboard("height", true, heightRecord);
+    await this.loadRemoteLeaderboard("score", true, scoreRecord);
+  }
+
+  switchLeaderboardTab(board) {
+    if (this.leaderboardTab === board) return;
+    this.leaderboardTab = board;
+    this.resetLeaderboardScroll();
+    const store = this.remoteLeaderboards[board];
+    if (store && store.status === "idle") {
+      void this.loadRemoteLeaderboard(board, false);
+    }
   }
 
   createLoggedInOwnRanking() {
@@ -8128,7 +8354,7 @@ class Game {
     return {
       rank: 0,
       score: Number(best.score) || 0,
-      height: (Number(best.height) || 0) / CONFIG.pixelsPerMeter,
+      height: Math.round(((Number(best.height) || 0) / CONFIG.pixelsPerMeter) * 10) / 10,
       duration: Number(best.duration) || 0,
       nickname: user.nickname || "腾讯新闻用户",
       userId: user.userId || "",
@@ -8136,8 +8362,10 @@ class Game {
     };
   }
 
-  getLeaderboardData() {
-    const remote = this.remoteLeaderboard || { status: "idle", entries: [], own: null };
+  getLeaderboardData(board) {
+    const target = board || this.leaderboardTab || "height";
+    const isHeight = target === "height";
+    const remote = this.remoteLeaderboards[target] || { status: "idle", entries: [], own: null };
     const best = this.scoreManager.best;
     const entries = remote.entries.map((entry, index) => {
       const entryRank = Number(entry.rank) || index + 1;
@@ -8145,6 +8373,8 @@ class Game {
       return {
         name: entry.nickname || "匿名用户",
         score: entryScore,
+        height: isHeight ? Number(entry.height) || 0 : 0,
+        duration: isHeight && Number(entry.time) >= 0 ? Number(entry.time) : 0,
         rank: entryRank,
         avatarUrl: entry.avatar || "",
         avatar: index % 2 === 0 ? "hairFemaleFront" : "hairMaleFront"
@@ -8153,9 +8383,22 @@ class Game {
       .filter((entry) => entry.rank >= 1 && entry.rank <= 50)
       .sort((a, b) => a.rank - b.rank || b.score - a.score)
       .slice(0, 50);
-    const own = remote.own ? {
+    const hasRemoteHeightRecord = Boolean(remote.own && (Number(remote.own.score) > 0 || Number(remote.own.rank) > 0));
+    const noHeightRecord = isHeight && !hasRemoteHeightRecord && !this.scoreManager.isHeightLeaderboardEligible();
+    const own = noHeightRecord ? {
+      name: "暂无高度记录",
+      score: 0,
+      height: 0,
+      duration: 0,
+      rank: 0,
+      avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
+      isOwn: true,
+      noHeightRecord: true
+    } : remote.own ? {
       name: remote.own.nickname || "我的最高记录",
-      score: Number(remote.own.score) || Number(best.score) || 0,
+      score: Number(remote.own.score) || 0,
+      height: isHeight ? Number(remote.own.height) || Math.round(((Number(best.height) || 0) / CONFIG.pixelsPerMeter) * 10) / 10 : 0,
+      duration: isHeight && Number(remote.own.time) >= 0 ? Number(remote.own.time) : Number(best.duration) || 0,
       rank: Number(remote.own.rank) || 0,
       avatarUrl: remote.own.avatar || "",
       avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
@@ -8163,17 +8406,24 @@ class Game {
     } : {
       name: this.guestRankingMode ? "游客本机记录" : "我的本机记录",
       score: Number(best.score) || 0,
+      height: isHeight ? Math.round(((Number(best.height) || 0) / CONFIG.pixelsPerMeter) * 10) / 10 : 0,
+      duration: isHeight ? Number(best.duration) || 0 : 0,
       rank: 0,
       avatar: this.outfit.hair === "hair_female" ? "hairFemaleFront" : "hairMaleFront",
       isOwn: true
     };
     const previous = own.rank > 1 ? entries.find((row) => row.rank === own.rank - 1) : null;
+    const gap = previous
+      ? Math.max(0, isHeight ? previous.height - own.height : previous.score - own.score)
+      : 0;
     return {
       status: remote.status,
       error: remote.error,
       rows: entries,
       own,
-      gap: previous ? Math.max(0, previous.score - own.score) : 0
+      isHeight,
+      gap,
+      gapText: isHeight ? `距离上一名还差 ${formatMeters(gap)}` : `距离上一名还差 ${gap} 分`
     };
   }
 
@@ -8304,7 +8554,7 @@ class Game {
     ctx.fillText(String(rank), x, y);
   }
 
-  drawLeaderboardRow(ctx, row, x, y, w, h, highlighted = false) {
+  drawLeaderboardRow(ctx, row, x, y, w, h, highlighted = false, isHeight = true) {
     ctx.save();
     ctx.shadowColor = highlighted ? "rgba(62, 174, 220, 0.20)" : "rgba(49, 95, 114, 0.10)";
     ctx.shadowBlur = 9;
@@ -8326,12 +8576,22 @@ class Game {
     ctx.textAlign = "right";
     ctx.fillStyle = "#168fc8";
     setCanvasFont(ctx, '900 20px "Arial Rounded MT Bold", "PingFang SC", sans-serif');
-    ctx.fillText(`${row.score}分`, x + w - 14, y + h / 2);
+    if (isHeight) {
+      ctx.fillText(row.noHeightRecord ? "--" : formatMeters(row.height), x + w - 14, y + h / 2 - 7);
+      ctx.fillStyle = "#5a7686";
+      setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
+      const timeText = row.noHeightRecord
+        ? "完成一局后记录最高高度"
+        : Number(row.duration) > 0 ? `用时 ${Math.floor(row.duration)} 秒` : "高度优先";
+      ctx.fillText(timeText, x + w - 14, y + h / 2 + 13);
+    } else {
+      ctx.fillText(`${Math.round(Number(row.score) || 0)}分`, x + w - 14, y + h / 2);
+    }
     ctx.restore();
   }
 
   drawLeaderboardPanel(ctx, fromGameOver = false) {
-    const data = this.getLeaderboardData();
+    const data = this.getLeaderboardData(this.leaderboardTab);
     const panelX = 22;
     const panelY = 134;
     const panelW = CONFIG.logicalWidth - 44;
@@ -8360,11 +8620,36 @@ class Game {
 
     this.drawLeaderboardTitle(ctx, CONFIG.logicalWidth / 2, 118);
 
+    const tabW = 116;
+    const tabH = 32;
+    const tabGap = 12;
+    const tabStartX = (CONFIG.logicalWidth - tabW * 2 - tabGap) / 2;
+    const tabY = panelY + 32;
+    const tabs = [
+      { id: "leaderboard-tab-score", label: "得分榜", active: this.leaderboardTab === "score" },
+      { id: "leaderboard-tab-height", label: "高度榜", active: this.leaderboardTab === "height" }
+    ];
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    tabs.forEach((tab, index) => {
+      const x = tabStartX + index * (tabW + tabGap);
+      ctx.fillStyle = tab.active ? "#2197d3" : "rgba(255, 255, 255, 0.82)";
+      this.roundRect(ctx, x, tabY, tabW, tabH, 16);
+      ctx.fill();
+      ctx.fillStyle = tab.active ? "#ffffff" : "#3a6b86";
+      setCanvasFont(ctx, '800 14px "PingFang SC", "Microsoft YaHei", sans-serif');
+      ctx.fillText(tab.label, x + tabW / 2, tabY + tabH / 2);
+      const buttons = fromGameOver ? this.uiButtons : this.uiPanel.buttons;
+      if (buttons) buttons.push({ id: tab.id, x, y: tabY, w: tabW, h: tabH });
+    });
+    ctx.restore();
+
     const rowX = panelX + 15;
     const rowW = panelW - 30;
     const rowH = 58;
     const rowGap = 7;
-    const listY = panelY + 64;
+    const listY = panelY + 98;
     const footerY = panelY + panelH - 12;
     const ownY = panelY + panelH - 88;
     const listBottom = ownY - 20;
@@ -8413,7 +8698,7 @@ class Game {
       ctx.fillText("登录腾讯新闻，挑战排行榜", CONFIG.logicalWidth / 2, btnY + btnH / 2);
       ctx.restore();
       if (!fromGameOver) {
-        this.uiPanel.buttons = [{ id: "open-news-app", x: btnX, y: btnY, w: btnW, h: btnH }];
+        this.uiPanel.buttons.push({ id: "open-news-app", x: btnX, y: btnY, w: btnW, h: btnH });
       }
     } else if (data.rows.length === 0) {
       ctx.save();
@@ -8430,7 +8715,7 @@ class Game {
       data.rows.forEach((row, index) => {
         const rowY = listY + index * (rowH + rowGap) - this.leaderboardScrollOffset;
         if (rowY + rowH < listY || rowY > listBottom) return;
-        this.drawLeaderboardRow(ctx, row, rowX, rowY, rowW, rowH, Boolean(row.isOwn));
+        this.drawLeaderboardRow(ctx, row, rowX, rowY, rowW, rowH, Boolean(row.isOwn), data.isHeight);
       });
       ctx.restore();
       if (this.leaderboardMaxScroll > 0) {
@@ -8455,10 +8740,10 @@ class Game {
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#708096";
       setCanvasFont(ctx, '700 12px "PingFang SC", sans-serif');
-      ctx.fillText(`距离上一名还差 ${data.gap} 分`, CONFIG.logicalWidth / 2, ownY - 13);
+      ctx.fillText(data.gapText, CONFIG.logicalWidth / 2, ownY - 13);
       ctx.restore();
     }
-    this.drawLeaderboardRow(ctx, data.own, rowX, ownY, rowW, 58, true);
+    this.drawLeaderboardRow(ctx, data.own, rowX, ownY, rowW, 58, true, data.isHeight);
     ctx.save();
     ctx.fillStyle = "#8b98a5";
     ctx.textAlign = "center";
