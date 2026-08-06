@@ -420,6 +420,13 @@ const DEFAULT_OUTFIT = {
 
 const OUTFIT_STORAGE_KEY = "ropeClimbJumpOutfit";
 const SPIDER_WEB_EFFECT_STORAGE_KEY = "panleGeYanSpiderWebEffectEnabled";
+const LIMITED_SKIN_STORAGE_KEY = "panleGeYanLimitedSkinProgress";
+const LIMITED_SKIN_ITEMS = {
+  shirt_spider: { cost: 5, label: "蜘蛛战衣", part: "shirt" },
+  pants_navy: { cost: 5, label: "深蓝下装", part: "pants" },
+  chalk_red: { cost: 3, label: "红色粉袋", part: "chalkBag" },
+  theme07: { cost: 8, label: "暗夜极限", part: "theme" }
+};
 const OUTFIT_PARTS = [
   { id: "hair", label: "发型" },
   { id: "accessory", label: "配饰" },
@@ -2784,6 +2791,16 @@ class Game {
     this.scoreManager = new ScoreManager();
     this.camera = new Camera();
     this.player = new Player();
+    this.limitedSkinProgress = this.loadLimitedSkinProgress();
+    if (!this.isLimitedSkinUnlocked("theme07")) {
+      try {
+        if (window.localStorage.getItem(HOLD_THEME_STORAGE_KEY) === "theme07") {
+          window.localStorage.removeItem(HOLD_THEME_STORAGE_KEY);
+        }
+      } catch (error) {
+        // Storage may be disabled; theme selection still works for this session.
+      }
+    }
     this.holdAssets = new HoldAssetManager(HOLD_THEME_ASSET_SETS);
     this.generator = new HoldGenerator(this.holdAssets);
     this.playerAssets = new PlayerAssetManager(PLAYER_ASSET_FILES);
@@ -2932,19 +2949,97 @@ class Game {
       const hair = parsed.hair === "hair_02" || parsed.hair === "hair_female"
         ? "hair_01"
         : parsed.hair;
+      const shirt = parsed.shirt === "shirt_female" ? "shirt_01" : parsed.shirt;
       return {
         hair: this.isValidOutfitOption("hair", hair) ? hair : DEFAULT_OUTFIT.hair,
         accessory: this.isValidOutfitOption("accessory", accessory) ? accessory : DEFAULT_OUTFIT.accessory,
-        shirt: this.isValidOutfitOption("shirt", parsed.shirt === "shirt_female" ? "shirt_01" : parsed.shirt)
-          ? (parsed.shirt === "shirt_female" ? "shirt_01" : parsed.shirt)
-          : DEFAULT_OUTFIT.shirt,
-        pants: this.isValidOutfitOption("pants", parsed.pants) ? parsed.pants : DEFAULT_OUTFIT.pants,
-        chalkBag: this.isValidOutfitOption("chalkBag", parsed.chalkBag) ? parsed.chalkBag : DEFAULT_OUTFIT.chalkBag,
+        shirt: this.isValidOutfitOption("shirt", shirt) && this.isLimitedSkinUnlocked(shirt) ? shirt : DEFAULT_OUTFIT.shirt,
+        pants: this.isValidOutfitOption("pants", parsed.pants) && this.isLimitedSkinUnlocked(parsed.pants) ? parsed.pants : DEFAULT_OUTFIT.pants,
+        chalkBag: this.isValidOutfitOption("chalkBag", parsed.chalkBag) && this.isLimitedSkinUnlocked(parsed.chalkBag) ? parsed.chalkBag : DEFAULT_OUTFIT.chalkBag,
         glasses: accessory === "glasses_01"
       };
     } catch (error) {
       return { ...DEFAULT_OUTFIT };
     }
+  }
+
+  loadLimitedSkinProgress() {
+    const fallback = { fragments: 0, unlocked: {} };
+    try {
+      const raw = window.localStorage.getItem(LIMITED_SKIN_STORAGE_KEY);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return {
+        fragments: Math.max(0, Math.floor(Number(parsed.fragments) || 0)),
+        unlocked: parsed.unlocked && typeof parsed.unlocked === "object" ? { ...parsed.unlocked } : {}
+      };
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  saveLimitedSkinProgress() {
+    try {
+      window.localStorage.setItem(LIMITED_SKIN_STORAGE_KEY, JSON.stringify(this.limitedSkinProgress));
+    } catch (error) {
+      // Storage may be disabled; progress still works for the current session.
+    }
+  }
+
+  isLimitedSkinItem(optionId) {
+    return Boolean(LIMITED_SKIN_ITEMS[optionId]);
+  }
+
+  isLimitedSkinUnlocked(optionId) {
+    return !this.isLimitedSkinItem(optionId) || Boolean(this.limitedSkinProgress.unlocked[optionId]);
+  }
+
+  canRedeemLimitedSkin(optionId) {
+    const item = LIMITED_SKIN_ITEMS[optionId];
+    return Boolean(item && !this.isLimitedSkinUnlocked(optionId) && this.limitedSkinProgress.fragments >= item.cost);
+  }
+
+  redeemLimitedSkin(optionId) {
+    const item = LIMITED_SKIN_ITEMS[optionId];
+    if (!item || this.isLimitedSkinUnlocked(optionId)) return false;
+    if (!this.canRedeemLimitedSkin(optionId)) {
+      this.showToast(`还需 ${item.cost - this.limitedSkinProgress.fragments} 个碎片`);
+      return false;
+    }
+    this.limitedSkinProgress.fragments -= item.cost;
+    this.limitedSkinProgress.unlocked[optionId] = true;
+    this.saveLimitedSkinProgress();
+    this.showToast(`已兑换：${item.label}`);
+    reportQuwanEvent("limited_skin_redeem", { item_id: optionId, cost: item.cost });
+    return true;
+  }
+
+  getNextFragmentScoreGap() {
+    return Math.max(1800, Math.round(3000 + (Math.random() - 0.5) * 1200));
+  }
+
+  scheduleNextFragment() {
+    this.nextFragmentScore = this.score + this.getNextFragmentScoreGap();
+  }
+
+  attachFragmentToUpcomingTarget() {
+    if (this.fragmentPending || !this.targetHold || this.tutorialActive || this.roundEnded) return;
+    if (this.score < this.nextFragmentScore) return;
+    this.targetHold.limitedFragment = true;
+    this.fragmentPending = { holdId: this.targetHold.id };
+  }
+
+  collectLimitedFragment(hold) {
+    if (!hold || !hold.limitedFragment) return false;
+    hold.limitedFragment = false;
+    this.fragmentPending = null;
+    this.limitedSkinProgress.fragments += 1;
+    this.saveLimitedSkinProgress();
+    this.scheduleNextFragment();
+    this.fragmentPickupPulse = 1;
+    this.showToast(`获得限定碎片 ×1（共 ${this.limitedSkinProgress.fragments}）`);
+    reportQuwanEvent("limited_fragment_collect", { fragments: this.limitedSkinProgress.fragments, score: this.score });
+    return true;
   }
 
   loadSoundMutedPreference() {
@@ -3144,6 +3239,9 @@ class Game {
     if (!this.isValidOutfitOption(part, optionId)) {
       return;
     }
+    if (!this.isLimitedSkinUnlocked(optionId)) {
+      if (!this.redeemLimitedSkin(optionId)) return;
+    }
     this.outfit[part] = optionId;
     this.saveOutfit();
     this.checkSpiderWebEffectPrompt();
@@ -3246,6 +3344,9 @@ class Game {
     this.chargeDirection = 1;
     this.poseCharge = 0;
     this.score = 0;
+    this.nextFragmentScore = this.getNextFragmentScoreGap();
+    this.fragmentPending = null;
+    this.fragmentPickupPulse = 0;
     this.preciseCombo = 0;
     this.bestPreciseCombo = 0;
     this.feedback = null;
@@ -3354,6 +3455,9 @@ class Game {
     if (this.themeSwitchPending || themeId === this.holdAssets.currentThemeId) return;
     const themeInfo = HOLD_THEME_ASSET_SETS.find((theme) => theme.id === themeId);
     if (!themeInfo) return;
+    if (!this.isLimitedSkinUnlocked(themeId)) {
+      if (!this.redeemLimitedSkin(themeId)) return;
+    }
     this.themeSwitchPending = true;
     this.outfitThemeLoadingId = themeId;
     try {
@@ -4452,6 +4556,7 @@ class Game {
       ));
     }
     const grabbedHold = this.targetHold;
+    this.collectLimitedFragment(grabbedHold);
     this.clearSpiderWebEffect();
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
@@ -4508,6 +4613,7 @@ class Game {
       this.spawnRocketOnUpcomingHolds(crossedMilestones);
       this.autoClimb.milestone = Math.floor(this.score / CONFIG.autoClimbScoreInterval);
     }
+    this.attachFragmentToUpcomingTarget();
   }
 
   beginAutoClimb(milestoneCount = 1) {
@@ -4763,6 +4869,7 @@ class Game {
   confirmAutoClimbGrab() {
     const grabbedPowerUp = this.targetHold.powerUp;
     const grabbedHold = this.targetHold;
+    this.collectLimitedFragment(grabbedHold);
     this.clearSpiderWebEffect();
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
@@ -4791,6 +4898,7 @@ class Game {
     this.camera.beginFollowToWorldY(neutral.y);
     this.state = STATE.BODY_FOLLOW;
     this.autoClimb.phase = "bodyFollow";
+    this.attachFragmentToUpcomingTarget();
   }
 
   completeAutoClimbCycle() {
@@ -5679,6 +5787,7 @@ class Game {
     }
     if (this.state !== STATE.START) {
       this.drawPowerUpIcons(ctx);
+      this.drawLimitedFragmentIcons(ctx);
     }
     if (this.state === STATE.START) {
       this.drawStartScreen(ctx);
@@ -6694,6 +6803,39 @@ class Game {
       });
     }
   }
+  drawLimitedFragmentIcons(ctx) {
+    for (const hold of this.routeHolds) {
+      if (!hold.limitedFragment) continue;
+      const screen = this.worldToScreen(hold);
+      if (screen.y < -90 || screen.y > CONFIG.logicalHeight + 90) continue;
+      const time = performance.now() * 0.004;
+      const cy = screen.y - this.getHoldVisualRadius(hold) - 18 + Math.sin(time + hashNumber(hold.id)) * 3;
+      ctx.save();
+      ctx.translate(screen.x, cy);
+      ctx.rotate(Math.sin(time * 0.7) * 0.18);
+      ctx.shadowColor = "rgba(255, 76, 110, 0.7)";
+      ctx.shadowBlur = 10;
+      const gradient = ctx.createLinearGradient(-10, -12, 10, 12);
+      gradient.addColorStop(0, "#ff456d");
+      gradient.addColorStop(0.52, "#d7193f");
+      gradient.addColorStop(1, "#75152c");
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(0, -13);
+      ctx.lineTo(11, -4);
+      ctx.lineTo(7, 11);
+      ctx.lineTo(-8, 9);
+      ctx.lineTo(-12, -3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   drawPowerUpIcons(ctx) {
     for (const hold of this.routeHolds) {
       if (hold.powerUp) {
@@ -7963,6 +8105,7 @@ class Game {
     this.drawLives(ctx, livesX, CONFIG.safeTop + 52);
 
     this.drawPowerUpStatus(ctx);
+    this.drawFragmentHud(ctx);
 
     ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
     setCanvasFont(ctx, "900 15px Arial, Helvetica, sans-serif");
@@ -7979,6 +8122,35 @@ class Game {
 
     // 火箭库存：底部居中，点击使用爆发攀爬
     this.drawRocketButton(ctx);
+  }
+
+  drawFragmentHud(ctx) {
+    const count = this.limitedSkinProgress.fragments;
+    const x = CONFIG.safeSide + 4;
+    const y = CONFIG.safeTop + 18;
+    const pulse = 1 + (this.fragmentPickupPulse || 0) * 0.16;
+    this.fragmentPickupPulse = Math.max(0, (this.fragmentPickupPulse || 0) - 0.035);
+    ctx.save();
+    ctx.translate(x + 10, y);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = "#e52d55";
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.lineTo(8, -3);
+    ctx.lineTo(5, 8);
+    ctx.lineTo(-6, 7);
+    ctx.lineTo(-8, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = "rgba(255,255,255,0.98)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    setCanvasFont(ctx, "900 14px Arial, Helvetica, sans-serif");
+    ctx.fillText(`限定碎片 ×${count}`, x + 25, y);
   }
 
   drawLives(ctx, x, y) {
@@ -9342,6 +9514,9 @@ class Game {
     ctx.fillStyle = "#5f6c72";
     setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
     ctx.fillText(this.outfitPanelTab === "holds" ? "岩点预览" : "角色预览", x + 92, y + 27);
+    ctx.fillStyle = "#c9244d";
+    setCanvasFont(ctx, "900 12px Arial, Helvetica, sans-serif");
+    ctx.fillText(`限定碎片 ×${this.limitedSkinProgress.fragments}`, x + 92, y + 49);
     ctx.restore();
 
     this.drawOutfitShopBackButton(ctx, x + 9, y + 7);
@@ -9422,6 +9597,9 @@ class Game {
   drawOutfitHoldThemeCard(ctx, theme, x, y, w, h) {
     const selected = this.holdAssets.currentThemeId === theme.id;
     const loading = this.outfitThemeLoadingId === theme.id;
+    const limitedItem = LIMITED_SKIN_ITEMS[theme.id];
+    const locked = Boolean(limitedItem && !this.isLimitedSkinUnlocked(theme.id));
+    const redeemable = locked && this.canRedeemLimitedSkin(theme.id);
     this.uiPanel.buttons.push({ id: `outfit-hold-theme-${theme.id}`, x, y, w, h });
     ctx.save();
     ctx.fillStyle = selected ? "rgba(229, 252, 255, 0.98)" : "rgba(244, 249, 251, 0.98)";
@@ -9439,7 +9617,27 @@ class Game {
     ctx.fillText(theme.label, x + w / 2, y + 61);
     ctx.fillStyle = selected ? "#28a9c2" : "rgba(82, 99, 107, 0.58)";
     setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
-    ctx.fillText(loading ? "加载中..." : selected ? "使用中" : "点击切换", x + w / 2, y + 78);
+    ctx.fillText(
+      locked ? (redeemable ? "可兑换" : `🔒 ${limitedItem.cost}碎片`) : loading ? "加载中..." : selected ? "使用中" : "点击切换",
+      x + w / 2,
+      y + 78
+    );
+    if (locked) {
+      ctx.fillStyle = "rgba(45, 52, 57, 0.58)";
+      this.roundRect(ctx, x, y, w, h, 10);
+      ctx.fill();
+      if (redeemable) {
+        ctx.strokeStyle = "#ffcf45";
+        ctx.lineWidth = 2.5;
+        this.roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 9);
+        ctx.stroke();
+      }
+      ctx.fillStyle = redeemable ? "#ffe06b" : "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      setCanvasFont(ctx, "900 10px Arial, Helvetica, sans-serif");
+      ctx.fillText(redeemable ? "可兑换" : `🔒 ${limitedItem.cost}碎片`, x + w / 2, y + 78);
+    }
     ctx.restore();
   }
 
@@ -9552,6 +9750,9 @@ class Game {
 
   drawOutfitShopOptionCard(ctx, part, optionId, x, y, size, hitClip = null) {
     const selected = this.outfit[part] === optionId;
+    const limitedItem = LIMITED_SKIN_ITEMS[optionId];
+    const locked = Boolean(limitedItem && !this.isLimitedSkinUnlocked(optionId));
+    const redeemable = locked && this.canRedeemLimitedSkin(optionId);
     const hitX = hitClip ? Math.max(x, hitClip.x) : x;
     const hitRight = hitClip ? Math.min(x + size, hitClip.x + hitClip.w) : x + size;
     if (hitRight > hitX) {
@@ -9565,6 +9766,16 @@ class Game {
     ctx.lineWidth = selected ? 2.5 : 1;
     ctx.stroke();
     this.drawOutfitOptionPreview(ctx, optionId, x + size / 2, y + size / 2);
+    if (locked) {
+      ctx.fillStyle = "rgba(48, 54, 58, 0.62)";
+      this.roundRect(ctx, x, y, size, size, 8);
+      ctx.fill();
+      ctx.fillStyle = redeemable ? "#ffe06b" : "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      setCanvasFont(ctx, "900 10px Arial, Helvetica, sans-serif");
+      ctx.fillText(redeemable ? "可兑换" : `🔒 ${limitedItem.cost}`, x + size / 2, y + size - 10);
+    }
     ctx.restore();
   }
   drawOutfitPreview(ctx, cx, cy) {
