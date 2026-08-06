@@ -293,14 +293,15 @@ function resolveGameAssetMap(files) {
 }
 
 const HOLD_THEME_ASSET_SETS = [
-  { id: "theme01", basePath: gameAssetUrl("hold_themes/theme01"), manifestFile: gameAssetUrl("hold_themes/theme01/theme01_holds_manifest.json") },
-  { id: "theme02", basePath: gameAssetUrl("hold_themes/theme02"), manifestFile: gameAssetUrl("hold_themes/theme02/theme02_holds_manifest.json") },
-  { id: "theme03", basePath: gameAssetUrl("hold_themes/theme03"), manifestFile: gameAssetUrl("hold_themes/theme03/theme03_holds_manifest.json") },
-  { id: "theme04", basePath: gameAssetUrl("hold_themes/theme04"), manifestFile: gameAssetUrl("hold_themes/theme04/theme04_holds_manifest.json") },
-  { id: "theme05", basePath: gameAssetUrl("hold_themes/theme05"), manifestFile: gameAssetUrl("hold_themes/theme05/theme05_holds_manifest.json") },
-  { id: "theme06", basePath: gameAssetUrl("hold_themes/theme06"), manifestFile: gameAssetUrl("hold_themes/theme06/theme06_holds_manifest.json") },
-  { id: "theme07", basePath: gameAssetUrl("hold_themes/theme07"), manifestFile: gameAssetUrl("hold_themes/theme07/theme07_holds_manifest.json") }
+  { id: "theme01", label: "活力撞色", colors: ["#f2c94c", "#2f80ed"], basePath: gameAssetUrl("hold_themes/theme01"), manifestFile: gameAssetUrl("hold_themes/theme01/theme01_holds_manifest.json") },
+  { id: "theme02", label: "糖果派对", colors: ["#ff7eb6", "#70d6ff"], basePath: gameAssetUrl("hold_themes/theme02"), manifestFile: gameAssetUrl("hold_themes/theme02/theme02_holds_manifest.json") },
+  { id: "theme03", label: "森林探险", colors: ["#57a773", "#f3a712"], basePath: gameAssetUrl("hold_themes/theme03"), manifestFile: gameAssetUrl("hold_themes/theme03/theme03_holds_manifest.json") },
+  { id: "theme04", label: "冰川秘境", colors: ["#8dded8", "#80a8bf"], basePath: gameAssetUrl("hold_themes/theme04"), manifestFile: gameAssetUrl("hold_themes/theme04/theme04_holds_manifest.json") },
+  { id: "theme05", label: "奶油甜心", colors: ["#f3dfa6", "#d4bde9"], basePath: gameAssetUrl("hold_themes/theme05"), manifestFile: gameAssetUrl("hold_themes/theme05/theme05_holds_manifest.json") },
+  { id: "theme06", label: "暖阳假日", colors: ["#f6c85f", "#9b7ede"], basePath: gameAssetUrl("hold_themes/theme06"), manifestFile: gameAssetUrl("hold_themes/theme06/theme06_holds_manifest.json") },
+  { id: "theme07", label: "暗夜极限", colors: ["#233e5e", "#b7b1b0"], basePath: gameAssetUrl("hold_themes/theme07"), manifestFile: gameAssetUrl("hold_themes/theme07/theme07_holds_manifest.json") }
 ];
+const HOLD_THEME_STORAGE_KEY = "ropeClimbJumpHoldTheme";
 const PLAYER_ASSET_FILES = resolveGameAssetMap({
   fallingPose: "player/falling_pose.png",
   climbingPose: "player/climbing_pose.png",
@@ -319,8 +320,10 @@ const PLAYER_ASSET_FILES = resolveGameAssetMap({
   shirt: "player/shirt.png?v=20260708-rounded",
   shirtFemale: "player/outfit/shirt_female.png",
   shirtMale: "player/outfit/shirt_male.png",
+  shirtSpider: "player/outfit/shirt_spider.png",
   pantsBlue: "player/outfit/pants_blue.png",
   pantsBrown: "player/outfit/pants_brown.png",
+  pantsNavy: "player/outfit/pants_navy.png",
   shorts: "player/shorts.png",
   leftUpperArm: "player/left_upper_arm.png",
   leftLowerArm: "player/left_lower_arm.png",
@@ -333,10 +336,15 @@ const PLAYER_ASSET_FILES = resolveGameAssetMap({
   rightThigh: "player/right_thigh.png",
   rightShin: "player/right_shin.png",
   hips: "player/hips.png",
+  leftThighNavy: "player/outfit/left_thigh_navy.png",
+  rightThighNavy: "player/outfit/right_thigh_navy.png",
+  hipsNavy: "player/outfit/hips_navy.png",
   belt: "player/belt.png",
+  beltNavy: "player/outfit/belt_navy.png",
   chalkBagSprite: "player/chalk_bag.png",
   chalkBag01: "player/outfit/chalk_bag_01.png",
   chalkBag02: "player/outfit/chalk_bag_02.png",
+  chalkBagRed: "player/outfit/chalk_bag_red.png",
   leftFoot: "player/left_foot.png",
   rightFoot: "player/right_foot.png"
 });
@@ -431,15 +439,18 @@ const OUTFIT_OPTIONS = {
   shirt: [
     { id: "shirt_01", label: "粉色" },
     { id: "shirt_female", label: "蓝绿" },
-    { id: "shirt_male", label: "青色" }
+    { id: "shirt_male", label: "青色" },
+    { id: "shirt_spider", label: "蜘蛛战衣" }
   ],
   pants: [
-    { id: "pants_blue", label: "蓝裤" },
-    { id: "pants_brown", label: "棕裤" }
+    { id: "pants_blue", label: "浅蓝" },
+    { id: "pants_brown", label: "棕裤" },
+    { id: "pants_navy", label: "深蓝" }
   ],
   chalkBag: [
-    { id: "chalk_01", label: "粉袋 1" },
-    { id: "chalk_02", label: "粉袋 2" }
+    { id: "chalk_01", label: "粉色" },
+    { id: "chalk_02", label: "粉袋 2" },
+    { id: "chalk_red", label: "红色" }
   ]
 };
 
@@ -1021,7 +1032,29 @@ class HoldAssetManager {
       const forced = this.themeSets.find((theme) => theme.id === forcedTheme);
       if (forced) return forced;
     }
+    const savedTheme = this.getSavedThemeId();
+    if (savedTheme) {
+      const saved = this.themeSets.find((theme) => theme.id === savedTheme);
+      if (saved) return saved;
+    }
     return this.themeSets[Math.floor(Math.random() * this.themeSets.length)] || null;
+  }
+
+  getSavedThemeId() {
+    try {
+      const savedThemeId = window.localStorage.getItem(HOLD_THEME_STORAGE_KEY);
+      return this.themeSets.some((theme) => theme.id === savedThemeId) ? savedThemeId : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  saveThemeId(themeId) {
+    try {
+      window.localStorage.setItem(HOLD_THEME_STORAGE_KEY, themeId);
+    } catch (error) {
+      // Storage may be disabled; the selected theme still works for this session.
+    }
   }
 
   registerTheme(theme) {
@@ -1087,8 +1120,15 @@ class HoldAssetManager {
 
   async switchToNextTheme() {
     const nextTheme = this.getNextThemeSet();
-    const loadedTheme = await this.ensureThemeLoaded(nextTheme);
+    return this.switchToTheme(nextTheme && nextTheme.id);
+  }
+
+  async switchToTheme(themeId) {
+    const requestedTheme = this.themeSets.find((theme) => theme.id === themeId);
+    if (!requestedTheme) return this.currentThemeId;
+    const loadedTheme = await this.ensureThemeLoaded(requestedTheme);
     if (!loadedTheme || !this.useTheme(loadedTheme.id)) return this.currentThemeId;
+    this.saveThemeId(loadedTheme.id);
     reportQuwanEvent("theme_switched", { theme_id: loadedTheme.id });
     void this.preloadNextTheme();
     return this.currentThemeId;
@@ -2753,12 +2793,23 @@ class Game {
     this.outfitBackdrop = null;
     this.outfitPreviewTime = 0;
     this.lastOutfitRenderTime = 0;
+    this.outfitPanelTab = "clothes";
+    this.outfitThemeLoadingId = null;
+    this.outfitRowScroll = Object.fromEntries(OUTFIT_PARTS.map((part) => [part.id, 0]));
+    this.outfitRowScrollRects = [];
+    this.outfitRowDrag = null;
     this.uiIconAssets = this.loadUiIconAssets();
     this.feedbackAssets = this.loadFeedbackAssets();
     this.figmaUiAssets = this.loadFigmaUiAssets();
     this.audio = new AudioManager(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
+    this.spiderWebEffect = typeof window.SpiderWebEffect === "function"
+      ? new window.SpiderWebEffect({
+        assetBase: gameAssetUrl("spider-web-effect"),
+        zIndex: 20
+      })
+      : null;
     this.soundMuted = this.loadSoundMutedPreference();
     this.audio.enabled = !this.soundMuted;
     this.audio.bgm.muted = this.soundMuted;
@@ -2951,6 +3002,77 @@ class Game {
     return Boolean(OUTFIT_OPTIONS[part] && OUTFIT_OPTIONS[part].some((option) => option.id === optionId));
   }
 
+  isSpiderSuitEquipped() {
+    return Boolean(
+      this.outfit
+      && this.outfit.shirt === "shirt_spider"
+      && this.outfit.pants === "pants_navy"
+      && this.outfit.chalkBag === "chalk_red"
+    );
+  }
+
+  isSpiderThemeActive() {
+    return Boolean(this.holdAssets && this.holdAssets.currentThemeId === "theme07");
+  }
+
+  isSpiderWebEffectEnabled() {
+    return this.isSpiderSuitEquipped() && this.isSpiderThemeActive();
+  }
+
+  clearSpiderWebEffect() {
+    this.spiderWebContactWorld = null;
+    if (this.spiderWebClearTimer) {
+      window.clearTimeout(this.spiderWebClearTimer);
+      this.spiderWebClearTimer = null;
+    }
+    if (this.spiderWebFadeTimer) {
+      window.clearTimeout(this.spiderWebFadeTimer);
+      this.spiderWebFadeTimer = null;
+    }
+    if (this.spiderWebEffect) {
+      this.spiderWebEffect.clear();
+    }
+  }
+
+  updateSpiderWebEffectPosition() {
+    if (!this.spiderWebEffect || !this.isSpiderWebEffectEnabled() || !this.spiderWebContactWorld) {
+      return;
+    }
+    const screen = this.worldToScreen(this.spiderWebContactWorld);
+    const rect = this.canvas.getBoundingClientRect();
+    this.spiderWebEffect.moveAt(
+      rect.left + (screen.x / CONFIG.logicalWidth) * rect.width,
+      rect.top + (screen.y / CONFIG.logicalHeight) * rect.height
+    );
+  }
+
+  playSpiderWebEffectAtHold(hold) {
+    if (!hold || !this.spiderWebEffect || !this.isSpiderWebEffectEnabled()) {
+      this.clearSpiderWebEffect();
+      return null;
+    }
+    this.clearSpiderWebEffect();
+    this.spiderWebContactWorld = { x: hold.x, y: hold.y };
+    const contactScreen = this.worldToScreen(this.spiderWebContactWorld);
+    const rect = this.canvas.getBoundingClientRect();
+    const result = this.spiderWebEffect.playAt(
+      rect.left + (contactScreen.x / CONFIG.logicalWidth) * rect.width,
+      rect.top + (contactScreen.y / CONFIG.logicalHeight) * rect.height
+    );
+    this.spiderWebFadeTimer = window.setTimeout(() => {
+      this.spiderWebFadeTimer = null;
+      this.spiderWebEffect.fadeOut();
+      this.spiderWebClearTimer = window.setTimeout(() => {
+        this.clearSpiderWebEffect();
+      }, 320);
+    }, 1000);
+    reportQuwanEvent("spider_web_effect", {
+      theme_id: this.holdAssets.currentThemeId,
+      group_id: result && result.groupId || 0
+    });
+    return result;
+  }
+
   saveOutfit() {
     this.outfit.glasses = this.outfit.accessory === "glasses_01";
     try {
@@ -2974,6 +3096,9 @@ class Game {
     }
     this.outfit[part] = optionId;
     this.saveOutfit();
+    if (!this.isSpiderWebEffectEnabled()) {
+      this.clearSpiderWebEffect();
+    }
     const partInfo = OUTFIT_PARTS.find((item) => item.id === part);
     const optionInfo = OUTFIT_OPTIONS[part].find((item) => item.id === optionId);
     this.showToast(`已切换${partInfo ? partInfo.label : "换装"}：${optionInfo ? optionInfo.label : optionId}`);
@@ -3064,6 +3189,7 @@ class Game {
   }
 
   resetGame(options = {}) {
+    this.clearSpiderWebEffect();
     this.state = STATE.RESTARTING;
     this.charge = 0;
     this.chargeDirection = 1;
@@ -3169,15 +3295,45 @@ class Game {
     reportQuwanEvent("game_start", { theme_id: this.holdAssets.currentThemeId || "" });
   }
 
-  async restartWithNextTheme() {
-    if (this.themeSwitchPending) return;
+  restartWithSelectedTheme() {
+    this.resetGame();
+  }
+
+  async selectOutfitHoldTheme(themeId) {
+    if (this.themeSwitchPending || themeId === this.holdAssets.currentThemeId) return;
+    const themeInfo = HOLD_THEME_ASSET_SETS.find((theme) => theme.id === themeId);
+    if (!themeInfo) return;
     this.themeSwitchPending = true;
+    this.outfitThemeLoadingId = themeId;
     try {
-      await this.holdAssets.switchToNextTheme();
-      this.resetGame();
+      const selectedThemeId = await this.holdAssets.switchToTheme(themeId);
+      if (selectedThemeId !== themeId) {
+        this.showToast("主题加载失败，请重试");
+        return;
+      }
+      this.resetGame({ tutorialEnabled: false });
+      this.charge = 0;
+      this.poseCharge = 0;
+      this.prepareStartDemoClimb();
+      this.state = STATE.START;
+      this.refreshOutfitBackdrop();
+      this.showToast(`已切换岩点：${themeInfo.label}`);
     } finally {
+      this.outfitThemeLoadingId = null;
       this.themeSwitchPending = false;
     }
+  }
+
+  refreshOutfitBackdrop() {
+    const panel = this.uiPanel && this.uiPanel.type === "outfit"
+      ? this.uiPanel
+      : { type: "outfit" };
+    this.uiPanel = null;
+    this.outfitBackdrop = null;
+    this.draw();
+    this.captureOutfitBackdrop();
+    this.uiPanel = panel;
+    this.lastOutfitRenderTime = 0;
   }
 
   prepareStartDemoClimb() {
@@ -3582,6 +3738,19 @@ class Game {
   }
 
   beginUiDrag(point) {
+    if (this.uiPanel && this.uiPanel.type === "outfit" && this.outfitPanelTab === "clothes") {
+      const row = this.outfitRowScrollRects.find((item) => this.pointInRect(point, item, false));
+      if (row && row.maxScroll > 0) {
+        this.outfitRowDrag = {
+          part: row.part,
+          startX: point.x,
+          startY: point.y,
+          startOffset: this.outfitRowScroll[row.part] || 0,
+          moved: false
+        };
+        return true;
+      }
+    }
     const rankingVisible = Boolean(
       this.uiPanel && this.uiPanel.type === "rank"
       || this.state === STATE.GAME_OVER && this.gameOverStage === "ranking"
@@ -3597,6 +3766,21 @@ class Game {
   }
 
   updateUiDrag(point) {
+    if (this.outfitRowDrag && point) {
+      const deltaX = this.outfitRowDrag.startX - point.x;
+      const deltaY = this.outfitRowDrag.startY - point.y;
+      if (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4) {
+        this.outfitRowDrag.moved = true;
+      }
+      const row = this.outfitRowScrollRects.find((item) => item.part === this.outfitRowDrag.part);
+      const maxScroll = row ? row.maxScroll : 0;
+      this.outfitRowScroll[this.outfitRowDrag.part] = clamp(
+        this.outfitRowDrag.startOffset + deltaX,
+        0,
+        maxScroll
+      );
+      return;
+    }
     if (!this.leaderboardDrag || !point) return;
     const deltaY = this.leaderboardDrag.startY - point.y;
     this.leaderboardScrollOffset = clamp(
@@ -3606,7 +3790,15 @@ class Game {
     );
   }
 
-  endUiDrag() {
+  endUiDrag(point) {
+    if (this.outfitRowDrag) {
+      const shouldActivate = !this.outfitRowDrag.moved && point;
+      this.outfitRowDrag = null;
+      if (shouldActivate) {
+        this.handleUiPointer(point);
+      }
+      return;
+    }
     this.leaderboardDrag = null;
   }
 
@@ -3684,7 +3876,7 @@ class Game {
       return;
     }
     if (id === "restart") {
-      void this.restartWithNextTheme();
+      this.restartWithSelectedTheme();
       return;
     }
     if (id === "start") {
@@ -3707,11 +3899,11 @@ class Game {
       return;
     }
     if (id === "gameover-restart") {
-      void this.restartWithNextTheme();
+      this.restartWithSelectedTheme();
       return;
     }
     if (id === "gameover-close") {
-      void this.restartWithNextTheme();
+      this.restartWithSelectedTheme();
       return;
     }
     if (id === "sound") {
@@ -3727,10 +3919,19 @@ class Game {
     }
     if (id === "skin" || id === "shop") {
       this.selectedOutfitPart = "hair";
+      this.outfitPanelTab = "clothes";
       this.captureOutfitBackdrop();
       this.outfitPreviewTime = 0;
       this.lastOutfitRenderTime = 0;
       this.uiPanel = { type: "outfit" };
+      return;
+    }
+    if (id === "outfit-tab-clothes" || id === "outfit-tab-holds") {
+      this.outfitPanelTab = id === "outfit-tab-holds" ? "holds" : "clothes";
+      return;
+    }
+    if (id.startsWith("outfit-hold-theme-")) {
+      void this.selectOutfitHoldTheme(id.replace("outfit-hold-theme-", ""));
       return;
     }
     if (id.startsWith("outfit-part-")) {
@@ -4125,6 +4326,8 @@ class Game {
         grabbedPowerUp
       ));
     }
+    const grabbedHold = this.targetHold;
+    this.playSpiderWebEffectAtHold(grabbedHold);
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
     this.targetHold.powerUp = null;
@@ -4434,6 +4637,8 @@ class Game {
 
   confirmAutoClimbGrab() {
     const grabbedPowerUp = this.targetHold.powerUp;
+    const grabbedHold = this.targetHold;
+    this.playSpiderWebEffectAtHold(grabbedHold);
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
     this.targetHold.powerUp = null;
@@ -4510,6 +4715,7 @@ class Game {
   }
 
   handleFailedGrab(result) {
+    this.clearSpiderWebEffect();
     this.tutorialCompletionPending = false;
     this.audio.playMiss();
     this.failureReason = result === "tooStrong" ? "力量过大" : "力量不足";
@@ -5310,6 +5516,7 @@ class Game {
 
   draw() {
     const ctx = this.ctx;
+    this.updateSpiderWebEffectPosition();
     ctx.clearRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
     if (this.loading || this.state === STATE.LOADING) {
       this.drawLoadingScreen(ctx);
@@ -6707,6 +6914,18 @@ class Game {
   }
 
   getOutfitSpriteImage(assetName, image) {
+    if (this.outfit && this.outfit.pants === "pants_navy") {
+      const navyAssetNames = {
+        leftThigh: "leftThighNavy",
+        rightThigh: "rightThighNavy",
+        hips: "hipsNavy",
+        belt: "beltNavy"
+      };
+      const navyAssetName = navyAssetNames[assetName];
+      if (navyAssetName && this.playerAssets.isReady(navyAssetName)) {
+        return this.playerAssets.get(navyAssetName).image;
+      }
+    }
     if (this.outfit && this.outfit.pants === "pants_brown" && ["leftThigh", "rightThigh", "hips"].includes(assetName)) {
       return this.getBrownPantsSprite(assetName, image);
     }
@@ -6737,7 +6956,10 @@ class Game {
       const g = data[i + 1];
       const b = data[i + 2];
       const a = data[i + 3];
-      const isBlueFabric = a > 12 && b > 105 && g > 85 && r < 105 && (b - r > 38 || g - r > 36);
+      const isBlueFabric = a > 12
+        && b > 65
+        && b > r * 1.12
+        && (g > 48 || b - r > 36);
       if (!isBlueFabric) {
         continue;
       }
@@ -7015,6 +7237,9 @@ class Game {
     if (this.outfit.shirt === "shirt_male") {
       return "shirtMale";
     }
+    if (this.outfit.shirt === "shirt_spider") {
+      return "shirtSpider";
+    }
     return "shirt";
   }
 
@@ -7032,7 +7257,9 @@ class Game {
   }
 
   getOutfitChalkBagAssetName() {
-    return this.outfit.chalkBag === "chalk_02" ? "chalkBag02" : "chalkBag01";
+    if (this.outfit.chalkBag === "chalk_02") return "chalkBag02";
+    if (this.outfit.chalkBag === "chalk_red") return "chalkBagRed";
+    return "chalkBag01";
   }
 
   getOutfitHairAssetName(isFront) {
@@ -7077,7 +7304,7 @@ class Game {
     const rightBeltSide = this.getBodyLocalPoint(pose, buckleSideX, beltBandY);
 
     ctx.save();
-    ctx.strokeStyle = "#1687bf";
+    ctx.strokeStyle = this.outfit && this.outfit.pants === "pants_navy" ? "#171b20" : "#1687bf";
     ctx.lineWidth = 3.2;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -8803,7 +9030,7 @@ class Game {
     const h = 496;
     const leftW = 174;
     const optionX = x + 186;
-    const secondOptionX = x + 250;
+    const optionViewportW = x + w - optionX - 8;
     this.uiPanel.bounds = { x, y, w, h };
     this.uiPanel.closeRect = { x: x + 9, y: y + 7, w: 40, h: 40 };
     this.uiPanel.buttons = [{ id: "outfit-close", ...this.uiPanel.closeRect }];
@@ -8838,16 +9065,22 @@ class Game {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#5f6c72";
     setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
-    ctx.fillText("试衣间", x + 92, y + 27);
+    ctx.fillText(this.outfitPanelTab === "holds" ? "岩点预览" : "角色预览", x + 92, y + 27);
     ctx.restore();
 
     this.drawOutfitShopBackButton(ctx, x + 9, y + 7);
     this.drawOutfitShopPreview(ctx, x + leftW / 2, y + h / 2 + 28);
+    this.drawOutfitPanelTabs(ctx, x + 184, y + 13);
+
+    if (this.outfitPanelTab === "holds") {
+      this.drawOutfitHoldThemeOptions(ctx, x + 183, y + 58);
+      return;
+    }
 
     ctx.save();
     ctx.strokeStyle = "rgba(141, 177, 190, 0.34)";
     ctx.lineWidth = 1;
-    [104, 196, 288, 380].forEach((offset) => {
+    [132, 215, 298, 381].forEach((offset) => {
       ctx.beginPath();
       ctx.moveTo(x + 175, y + offset);
       ctx.lineTo(x + w - 1, y + offset);
@@ -8856,16 +9089,113 @@ class Game {
     ctx.restore();
 
     const sections = [
-      { part: "hair", label: "发型", y: y + 20, options: ["hair_female", "hair_male"] },
-      { part: "shirt", label: "上装", y: y + 113, options: ["shirt_01", "shirt_male"] },
-      { part: "pants", label: "下装", y: y + 205, options: ["pants_blue", "pants_brown"] },
-      { part: "chalkBag", label: "镁粉袋", y: y + 297, options: ["chalk_01", "chalk_02"] },
-      { part: "accessory", label: "配饰", y: y + 391, options: ["none", "glasses_01"], note: "敬请期待..." }
+      { part: "hair", label: "发型", y: y + 52, options: OUTFIT_OPTIONS.hair.map((option) => option.id) },
+      { part: "shirt", label: "上装", y: y + 135, options: OUTFIT_OPTIONS.shirt.map((option) => option.id) },
+      { part: "pants", label: "下装", y: y + 218, options: OUTFIT_OPTIONS.pants.map((option) => option.id) },
+      { part: "chalkBag", label: "镁粉袋", y: y + 301, options: OUTFIT_OPTIONS.chalkBag.map((option) => option.id) },
+      { part: "accessory", label: "配饰", y: y + 384, options: OUTFIT_OPTIONS.accessory.map((option) => option.id) }
     ];
 
+    this.outfitRowScrollRects = [];
     sections.forEach((section) => {
-      this.drawOutfitShopSection(ctx, section, optionX, secondOptionX);
+      this.drawOutfitShopSection(ctx, section, optionX, optionViewportW);
     });
+  }
+
+  drawOutfitPanelTabs(ctx, x, y) {
+    const tabs = [
+      { id: "clothes", label: "服装" },
+      { id: "holds", label: "岩点" }
+    ];
+    const tabW = 62;
+    const tabH = 32;
+    tabs.forEach((tab, index) => {
+      const tabX = x + index * (tabW + 5);
+      const selected = this.outfitPanelTab === tab.id;
+      this.uiPanel.buttons.push({ id: `outfit-tab-${tab.id}`, x: tabX, y, w: tabW, h: tabH });
+      ctx.save();
+      ctx.fillStyle = selected ? "#e5faff" : "#f1f5f6";
+      this.roundRect(ctx, tabX, y, tabW, tabH, 10);
+      ctx.fill();
+      ctx.strokeStyle = selected ? "#5bd8ee" : "rgba(91, 125, 138, 0.16)";
+      ctx.lineWidth = selected ? 2 : 1;
+      ctx.stroke();
+      ctx.fillStyle = selected ? "#167d93" : "#75858c";
+      setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tab.label, tabX + tabW / 2, y + tabH / 2 + 1);
+      ctx.restore();
+    });
+  }
+
+  drawOutfitHoldThemeOptions(ctx, x, y) {
+    const cardW = 58;
+    const cardH = 91;
+    const gapX = 7;
+    const gapY = 8;
+    HOLD_THEME_ASSET_SETS.forEach((theme, index) => {
+      const col = index % 2;
+      const row = Math.floor(index / 2);
+      const cardX = x + col * (cardW + gapX);
+      const cardY = y + row * (cardH + gapY);
+      this.drawOutfitHoldThemeCard(ctx, theme, cardX, cardY, cardW, cardH);
+    });
+  }
+
+  drawOutfitHoldThemeCard(ctx, theme, x, y, w, h) {
+    const selected = this.holdAssets.currentThemeId === theme.id;
+    const loading = this.outfitThemeLoadingId === theme.id;
+    this.uiPanel.buttons.push({ id: `outfit-hold-theme-${theme.id}`, x, y, w, h });
+    ctx.save();
+    ctx.fillStyle = selected ? "rgba(229, 252, 255, 0.98)" : "rgba(244, 249, 251, 0.98)";
+    this.roundRect(ctx, x, y, w, h, 10);
+    ctx.fill();
+    ctx.strokeStyle = selected ? "#5bd8ee" : "rgba(91, 125, 138, 0.16)";
+    ctx.lineWidth = selected ? 2.5 : 1;
+    ctx.stroke();
+
+    this.drawHoldThemeSwatch(ctx, theme, x + w / 2, y + 29, 21);
+    ctx.fillStyle = selected ? "#167d93" : "#52636b";
+    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(theme.label, x + w / 2, y + 61);
+    ctx.fillStyle = selected ? "#28a9c2" : "rgba(82, 99, 107, 0.58)";
+    setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
+    ctx.fillText(loading ? "加载中..." : selected ? "使用中" : "点击切换", x + w / 2, y + 78);
+    ctx.restore();
+  }
+
+  drawHoldThemeSwatch(ctx, theme, cx, cy, radius) {
+    const colors = theme.colors || ["#70d6ff", "#ff7eb6"];
+    const loadedAssets = this.holdAssets.themeAssets.get(theme.id) || [];
+    const previewAsset = loadedAssets.find((asset) => this.holdAssets.isAssetReady(asset));
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.clip();
+    const gradient = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
+    gradient.addColorStop(0, colors[0]);
+    gradient.addColorStop(1, colors[1]);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+    if (previewAsset) {
+      const sourceW = Math.max(1, previewAsset.nativeSize.width);
+      const sourceH = Math.max(1, previewAsset.nativeSize.height);
+      const scale = Math.min((radius * 1.7) / sourceW, (radius * 1.7) / sourceH);
+      const drawW = sourceW * scale;
+      const drawH = sourceH * scale;
+      ctx.drawImage(previewAsset.image, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawOutfitShopBackButton(ctx, x, y) {
@@ -8894,36 +9224,63 @@ class Game {
     ctx.restore();
   }
 
-  drawOutfitShopSection(ctx, section, x1, x2) {
+  drawOutfitShopSection(ctx, section, x, viewportW) {
+    const cardY = section.y + 21;
+    const cardSize = 52;
+    const gap = 12;
+    const contentW = section.options.length * cardSize + Math.max(0, section.options.length - 1) * gap;
+    const maxScroll = Math.max(0, contentW - viewportW);
+    this.outfitRowScroll[section.part] = clamp(this.outfitRowScroll[section.part] || 0, 0, maxScroll);
+    const scrollOffset = this.outfitRowScroll[section.part];
+    this.outfitRowScrollRects.push({ part: section.part, x, y: cardY, w: viewportW, h: cardSize, maxScroll });
+
     ctx.save();
     ctx.fillStyle = "#52636b";
     setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(section.label, x1, section.y + 7);
+    ctx.fillText(section.label, x, section.y + 7);
+    if (maxScroll > 0) {
+      ctx.fillStyle = "rgba(82, 99, 107, 0.48)";
+      setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
+      ctx.textAlign = "right";
+      ctx.fillText("左右滑动", x + viewportW, section.y + 7);
+    }
     ctx.restore();
 
-    const cardY = section.y + 21;
-    const cardSize = 52;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, cardY - 2, viewportW, cardSize + 4);
+    ctx.clip();
     section.options.forEach((optionId, index) => {
-      const optionX = index === 0 ? x1 : x2;
-      this.drawOutfitShopOptionCard(ctx, section.part, optionId, optionX, cardY, cardSize);
+      const optionX = x + index * (cardSize + gap) - scrollOffset;
+      if (optionX + cardSize < x || optionX > x + viewportW) return;
+      this.drawOutfitShopOptionCard(ctx, section.part, optionId, optionX, cardY, cardSize, { x, y: cardY, w: viewportW, h: cardSize });
     });
+    ctx.restore();
 
-    if (section.note) {
+    if (maxScroll > 0) {
+      const trackY = cardY + cardSize - 2;
+      const thumbW = Math.max(20, viewportW * (viewportW / contentW));
+      const thumbX = x + (viewportW - thumbW) * (scrollOffset / maxScroll);
       ctx.save();
-      ctx.fillStyle = "rgba(82, 99, 107, 0.58)";
-      setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(section.note, (x1 + x2 + cardSize) / 2, section.y + 87);
+      ctx.fillStyle = "rgba(82, 99, 107, 0.10)";
+      this.roundRect(ctx, x, trackY, viewportW, 2, 1);
+      ctx.fill();
+      ctx.fillStyle = "rgba(40, 169, 194, 0.55)";
+      this.roundRect(ctx, thumbX, trackY, thumbW, 2, 1);
+      ctx.fill();
       ctx.restore();
     }
   }
 
-  drawOutfitShopOptionCard(ctx, part, optionId, x, y, size) {
+  drawOutfitShopOptionCard(ctx, part, optionId, x, y, size, hitClip = null) {
     const selected = this.outfit[part] === optionId;
-    this.uiPanel.buttons.push({ id: `outfit-option-${part}:${optionId}`, x, y, w: size, h: size });
+    const hitX = hitClip ? Math.max(x, hitClip.x) : x;
+    const hitRight = hitClip ? Math.min(x + size, hitClip.x + hitClip.w) : x + size;
+    if (hitRight > hitX) {
+      this.uiPanel.buttons.push({ id: `outfit-option-${part}:${optionId}`, x: hitX, y, w: hitRight - hitX, h: size });
+    }
     ctx.save();
     ctx.fillStyle = selected ? "rgba(229, 252, 255, 0.98)" : "rgba(244, 249, 251, 0.98)";
     this.roundRect(ctx, x, y, size, size, 8);
@@ -9241,10 +9598,13 @@ class Game {
       shirt_01: { name: "shirt", scale: 0.22, y: 1 },
       shirt_female: { name: "shirtFemale", scale: 0.22, y: 1 },
       shirt_male: { name: "shirtMale", scale: 0.22, y: 1 },
+      shirt_spider: { name: "shirtSpider", scale: 0.22, y: 1 },
       pants_blue: { name: "pantsBlue", scale: 0.15, y: 0 },
       pants_brown: { name: "pantsBrown", scale: 0.15, y: 0 },
+      pants_navy: { name: "pantsNavy", scale: 0.15, y: 0 },
       chalk_01: { name: "chalkBag01", scale: 0.25, y: 0 },
-      chalk_02: { name: "chalkBag02", scale: 0.25, y: 0 }
+      chalk_02: { name: "chalkBag02", scale: 0.25, y: 0 },
+      chalk_red: { name: "chalkBagRed", scale: 0.25, y: 0 }
     };
     return map[optionId] || null;
   }
