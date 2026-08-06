@@ -3056,7 +3056,10 @@ class Game {
     const eligible = this.isSpiderWebEffectEligible();
     if (eligible && !this.spiderWebEffectEligibilityWasActive) {
       this.spiderWebEffectEligibilityWasActive = true;
-      this.uiPanel = { type: "spider-web-prompt" };
+      const returnPanel = this.uiPanel && this.uiPanel.type === "outfit"
+        ? this.uiPanel
+        : { type: "outfit" };
+      this.uiPanel = { type: "spider-web-prompt", returnPanel };
       return;
     }
     if (!eligible) {
@@ -3850,6 +3853,14 @@ class Game {
     this.leaderboardDrag = null;
   }
 
+  closeSpiderWebPrompt() {
+    if (!this.uiPanel || this.uiPanel.type !== "spider-web-prompt") {
+      return;
+    }
+    this.uiPanel = this.uiPanel.returnPanel || { type: "outfit" };
+    this.lastOutfitRenderTime = 0;
+  }
+
   handleUiPointer(point) {
     if (this.loading || this.state === STATE.LOADING) {
       return true;
@@ -3866,7 +3877,11 @@ class Game {
     if (this.uiPanel) {
       if (this.uiPanel.closeRect && this.pointInRect(point, this.uiPanel.closeRect)) {
         this.audio.playClick();
-        this.uiPanel = null;
+        if (this.uiPanel.type === "spider-web-prompt") {
+          this.closeSpiderWebPrompt();
+        } else {
+          this.uiPanel = null;
+        }
         return true;
       }
       const panelButton = this.uiPanel.buttons
@@ -3877,7 +3892,11 @@ class Game {
         return true;
       }
       if (this.uiPanel.bounds && !this.pointInRect(point, this.uiPanel.bounds)) {
-        this.uiPanel = null;
+        if (this.uiPanel.type === "spider-web-prompt") {
+          this.closeSpiderWebPrompt();
+        } else {
+          this.uiPanel = null;
+        }
       }
       return true;
     }
@@ -4023,7 +4042,7 @@ class Game {
       return;
     }
     if (id === "spider-web-confirm") {
-      this.uiPanel = null;
+      this.closeSpiderWebPrompt();
       return;
     }
     if (id === "open-news-app") {
@@ -8504,81 +8523,124 @@ class Game {
   }
 
   drawSpiderWebPrompt(ctx) {
-    const x = 43;
-    const y = 236;
-    const w = 289;
-    const h = 300;
-    const toggleRect = { x: x + 78, y: y + 164, w: 133, h: 62 };
-    const confirmRect = { x: x + 74, y: y + 240, w: w - 148, h: 42 };
+    const x = 60;
+    const y = 262;
+    const w = 255;
+    const h = 278;
+    const toggleRect = { x: x + 92, y: y + 197, w: 71, h: 34 };
+    const confirmRect = { x: x + 80, y: y + 238, w: 95, h: 30 };
     this.uiPanel.bounds = { x, y, w, h };
-    this.uiPanel.closeRect = { x: x + w - 48, y: y + 8, w: 40, h: 40 };
+    this.uiPanel.closeRect = { x: x + w - 40, y: y + 5, w: 34, h: 34 };
     this.uiPanel.buttons = [
       { id: "spider-web-toggle", ...toggleRect },
       { id: "spider-web-confirm", ...confirmRect }
     ];
 
     ctx.save();
-    ctx.fillStyle = "rgba(10, 25, 36, 0.5)";
+    ctx.fillStyle = "rgba(10, 25, 36, 0.42)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-
-    ctx.shadowColor = "rgba(11, 31, 46, 0.3)";
-    ctx.shadowBlur = 22;
-    ctx.shadowOffsetY = 9;
+    ctx.shadowColor = "rgba(11, 31, 46, 0.26)";
+    ctx.shadowBlur = 17;
+    ctx.shadowOffsetY = 7;
     ctx.fillStyle = "rgba(249, 252, 254, 0.99)";
-    this.roundRect(ctx, x, y, w, h, 22);
+    this.roundRect(ctx, x, y, w, h, 19);
     ctx.fill();
     ctx.shadowColor = "transparent";
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#152d40";
-    setCanvasFont(ctx, "900 24px Arial, Helvetica, sans-serif");
-    ctx.fillText("蜘蛛侠特效已解锁", x + w / 2, y + 48);
-
+    setCanvasFont(ctx, "900 19px Arial, Helvetica, sans-serif");
+    ctx.fillText("蜘蛛侠特效已解锁", x + w / 2, y + 34);
     ctx.fillStyle = "#617381";
-    setCanvasFont(ctx, "15px Arial, Helvetica, sans-serif");
-    ctx.fillText("蜘蛛侠套装与暗夜极限主题已集齐", x + w / 2, y + 87);
-    ctx.fillText("目标判定圈将随机变成白色蛛网", x + w / 2, y + 112);
+    setCanvasFont(ctx, "12px Arial, Helvetica, sans-serif");
+    ctx.fillText("开启后，黄色判定圈会变成随机蛛网", x + w / 2, y + 59);
+
+    const previewY = y + 124;
+    const previewCenters = [x + 70, x + 185];
+    const drawHold = (cx) => {
+      ctx.save();
+      ctx.translate(cx, previewY);
+      ctx.rotate(-0.18);
+      ctx.fillStyle = "#596872";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 15, 10, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.26)";
+      ctx.beginPath();
+      ctx.ellipse(-4, -3, 6, 3, -0.15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    drawHold(previewCenters[0]);
+    ctx.strokeStyle = "rgba(255, 212, 0, 0.92)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(previewCenters[0], previewY, 32, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#7a8992";
+    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
+    ctx.fillText("关闭", previewCenters[0], previewY + 48);
+
+    drawHold(previewCenters[1]);
+    const webAsset = this.spiderWebTargetAssets && this.spiderWebTargetAssets.web1;
+    if (webAsset && webAsset.loaded && !webAsset.failed && webAsset.image.complete) {
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.drawImage(webAsset.image, previewCenters[1] - 38, previewY - 38, 76, 76);
+      ctx.restore();
+    } else {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      for (let index = 0; index < 8; index += 1) {
+        const angle = index * Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(previewCenters[1], previewY);
+        ctx.lineTo(previewCenters[1] + Math.cos(angle) * 34, previewY + Math.sin(angle) * 34);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = "#7a8992";
+    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
+    ctx.fillText("开启", previewCenters[1], previewY + 48);
 
     const enabled = this.spiderWebEffectUserEnabled;
-    ctx.fillStyle = enabled ? "#e63946" : "#f1f2f3";
+    ctx.fillStyle = enabled ? "#e63946" : "#e1e4e6";
     this.roundRect(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, toggleRect.h / 2);
     ctx.fill();
-    const knobRadius = 25;
+    const knobRadius = 14;
     const knobX = enabled
       ? toggleRect.x + toggleRect.w - toggleRect.h / 2
       : toggleRect.x + toggleRect.h / 2;
     const knobY = toggleRect.y + toggleRect.h / 2;
-    ctx.shadowColor = "rgba(20, 40, 55, 0.18)";
-    ctx.shadowBlur = 7;
-    ctx.shadowOffsetY = 2;
+    ctx.shadowColor = "rgba(20, 40, 55, 0.16)";
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 1;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
     ctx.arc(knobX, knobY, knobRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowColor = "transparent";
-    ctx.fillStyle = enabled ? "#e63946" : "#778995";
-    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
-    ctx.fillText(enabled ? "已开启" : "已关闭", x + w / 2, toggleRect.y + toggleRect.h + 20);
 
-    ctx.strokeStyle = "rgba(94, 115, 129, 0.32)";
-    ctx.lineWidth = 1.5;
-    this.roundRect(ctx, confirmRect.x, confirmRect.y, confirmRect.w, confirmRect.h, 21);
+    ctx.strokeStyle = "rgba(94, 115, 129, 0.3)";
+    ctx.lineWidth = 1.2;
+    this.roundRect(ctx, confirmRect.x, confirmRect.y, confirmRect.w, confirmRect.h, 15);
     ctx.stroke();
     ctx.fillStyle = "#526875";
-    setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
+    setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
     ctx.fillText("知道了", x + w / 2, confirmRect.y + confirmRect.h / 2);
 
     const closeX = this.uiPanel.closeRect.x + this.uiPanel.closeRect.w / 2;
     const closeY = this.uiPanel.closeRect.y + this.uiPanel.closeRect.h / 2;
     ctx.strokeStyle = "#7b8c96";
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(closeX - 6, closeY - 6);
-    ctx.lineTo(closeX + 6, closeY + 6);
-    ctx.moveTo(closeX + 6, closeY - 6);
-    ctx.lineTo(closeX - 6, closeY + 6);
+    ctx.moveTo(closeX - 5, closeY - 5);
+    ctx.lineTo(closeX + 5, closeY + 5);
+    ctx.moveTo(closeX + 5, closeY - 5);
+    ctx.lineTo(closeX - 5, closeY + 5);
     ctx.stroke();
     ctx.restore();
   }
