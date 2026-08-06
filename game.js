@@ -6664,12 +6664,7 @@ class Game {
     const drawY = -image.naturalHeight * anchor.y * imageScale;
     const drawWidth = image.naturalWidth * imageScale;
     const drawHeight = image.naturalHeight * imageScale;
-    const boldOffsets = [
-      [-1.25, 0], [1.25, 0], [0, -1.25], [0, 1.25], [0, 0]
-    ];
-    for (const [offsetX, offsetY] of boldOffsets) {
-      ctx.drawImage(image, drawX + offsetX, drawY + offsetY, drawWidth, drawHeight);
-    }
+    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
     ctx.restore();
   }
 
