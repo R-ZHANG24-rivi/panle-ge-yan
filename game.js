@@ -6659,7 +6659,7 @@ class Game {
     ctx.save();
     ctx.translate(screen.x, screen.y);
     ctx.rotate(this.spiderWebTargetRotation || 0);
-    ctx.globalAlpha = 0.8;
+    ctx.globalAlpha = 1;
     const drawX = -image.naturalWidth * anchor.x * imageScale;
     const drawY = -image.naturalHeight * anchor.y * imageScale;
     const drawWidth = image.naturalWidth * imageScale;
