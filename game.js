@@ -6659,16 +6659,19 @@ class Game {
     ctx.save();
     ctx.translate(screen.x, screen.y);
     ctx.rotate(this.spiderWebTargetRotation || 0);
-    ctx.globalAlpha = 0.9;
-    ctx.shadowColor = "rgba(255, 255, 255, 0.72)";
-    ctx.shadowBlur = 8;
-    ctx.drawImage(
-      image,
-      -image.naturalWidth * anchor.x * imageScale,
-      -image.naturalHeight * anchor.y * imageScale,
-      image.naturalWidth * imageScale,
-      image.naturalHeight * imageScale
-    );
+    ctx.globalAlpha = 0.95;
+    ctx.shadowColor = "rgba(255, 255, 255, 0.82)";
+    ctx.shadowBlur = 9;
+    const drawX = -image.naturalWidth * anchor.x * imageScale;
+    const drawY = -image.naturalHeight * anchor.y * imageScale;
+    const drawWidth = image.naturalWidth * imageScale;
+    const drawHeight = image.naturalHeight * imageScale;
+    const boldOffsets = [
+      [-1.25, 0], [1.25, 0], [0, -1.25], [0, 1.25], [0, 0]
+    ];
+    for (const [offsetX, offsetY] of boldOffsets) {
+      ctx.drawImage(image, drawX + offsetX, drawY + offsetY, drawWidth, drawHeight);
+    }
     ctx.restore();
   }
 
