@@ -2810,6 +2810,11 @@ class Game {
         zIndex: 20
       })
       : null;
+    this.spiderWebTargetAssets = this.loadImageAssetMap({
+      web1: gameAssetUrl("spider-web-effect/web-1-main.png"),
+      web2: gameAssetUrl("spider-web-effect/web-2-main.png"),
+      web3: gameAssetUrl("spider-web-effect/web-3-main.png")
+    });
     this.soundMuted = this.loadSoundMutedPreference();
     this.audio.enabled = !this.soundMuted;
     this.audio.bgm.muted = this.soundMuted;
@@ -6636,55 +6641,34 @@ class Game {
       this.spiderWebTargetRotation = Math.random() * Math.PI * 2;
     }
     const variant = this.spiderWebTargetVariant || 0;
-    const spokeCount = [8, 10, 12][variant];
-    const layerCount = [3, 4, 3][variant];
-    const rotation = this.spiderWebTargetRotation || 0;
+    const asset = this.spiderWebTargetAssets && this.spiderWebTargetAssets[`web${variant + 1}`];
+    if (!asset || !asset.loaded || asset.failed || !asset.image.complete) {
+      return;
+    }
+    const anchors = [
+      { x: 0.5193, y: 0.5131 },
+      { x: 0.5207, y: 0.4729 },
+      { x: 0.5692, y: 0.4016 }
+    ];
+    const anchor = anchors[variant];
+    const image = asset.image;
     const pulse = 1 + Math.sin(time) * 0.025;
-    const radius = ringRadius * pulse;
+    const targetDiameter = ringRadius * 2.45 * pulse;
+    const imageScale = targetDiameter / Math.max(image.naturalWidth, image.naturalHeight);
 
     ctx.save();
     ctx.translate(screen.x, screen.y);
-    ctx.rotate(rotation);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    ctx.rotate(this.spiderWebTargetRotation || 0);
+    ctx.globalAlpha = 0.9;
     ctx.shadowColor = "rgba(255, 255, 255, 0.72)";
     ctx.shadowBlur = 8;
-
-    ctx.lineWidth = 2.2;
-    for (let index = 0; index < spokeCount; index += 1) {
-      const angle = (Math.PI * 2 * index) / spokeCount;
-      const innerRadius = radius * (variant === 1 ? 0.18 : 0.12);
-      const outerRadius = radius * (0.96 + 0.04 * Math.sin(index * 2.17 + variant));
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
-      ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
-      ctx.stroke();
-    }
-
-    ctx.lineWidth = 1.8;
-    for (let layer = 1; layer <= layerCount; layer += 1) {
-      const layerRadius = radius * (0.2 + (layer / layerCount) * 0.72);
-      ctx.beginPath();
-      for (let index = 0; index <= spokeCount; index += 1) {
-        const spokeIndex = index % spokeCount;
-        const angle = (Math.PI * 2 * spokeIndex) / spokeCount;
-        const wobble = 1 + 0.055 * Math.sin(spokeIndex * 1.91 + layer * 2.4 + variant);
-        const x = Math.cos(angle) * layerRadius * wobble;
-        const y = Math.sin(angle) * layerRadius * wobble;
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-    ctx.beginPath();
-    ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(
+      image,
+      -image.naturalWidth * anchor.x * imageScale,
+      -image.naturalHeight * anchor.y * imageScale,
+      image.naturalWidth * imageScale,
+      image.naturalHeight * imageScale
+    );
     ctx.restore();
   }
 
