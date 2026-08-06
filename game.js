@@ -4327,7 +4327,7 @@ class Game {
       ));
     }
     const grabbedHold = this.targetHold;
-    this.playSpiderWebEffectAtHold(grabbedHold);
+    this.clearSpiderWebEffect();
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
     this.targetHold.powerUp = null;
@@ -4638,7 +4638,7 @@ class Game {
   confirmAutoClimbGrab() {
     const grabbedPowerUp = this.targetHold.powerUp;
     const grabbedHold = this.targetHold;
-    this.playSpiderWebEffectAtHold(grabbedHold);
+    this.clearSpiderWebEffect();
     this.previousHold = this.currentHold;
     this.targetHold.state = "current";
     this.targetHold.powerUp = null;
@@ -6629,6 +6629,65 @@ class Game {
     ctx.restore();
   }
 
+  drawSpiderWebTargetRing(ctx, screen, ringRadius, time) {
+    if (this.spiderWebTargetHoldId !== this.targetHold.id) {
+      this.spiderWebTargetHoldId = this.targetHold.id;
+      this.spiderWebTargetVariant = Math.floor(Math.random() * 3);
+      this.spiderWebTargetRotation = Math.random() * Math.PI * 2;
+    }
+    const variant = this.spiderWebTargetVariant || 0;
+    const spokeCount = [8, 10, 12][variant];
+    const layerCount = [3, 4, 3][variant];
+    const rotation = this.spiderWebTargetRotation || 0;
+    const pulse = 1 + Math.sin(time) * 0.025;
+    const radius = ringRadius * pulse;
+
+    ctx.save();
+    ctx.translate(screen.x, screen.y);
+    ctx.rotate(rotation);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.shadowColor = "rgba(255, 255, 255, 0.72)";
+    ctx.shadowBlur = 8;
+
+    ctx.lineWidth = 2.2;
+    for (let index = 0; index < spokeCount; index += 1) {
+      const angle = (Math.PI * 2 * index) / spokeCount;
+      const innerRadius = radius * (variant === 1 ? 0.18 : 0.12);
+      const outerRadius = radius * (0.96 + 0.04 * Math.sin(index * 2.17 + variant));
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+      ctx.lineTo(Math.cos(angle) * outerRadius, Math.sin(angle) * outerRadius);
+      ctx.stroke();
+    }
+
+    ctx.lineWidth = 1.8;
+    for (let layer = 1; layer <= layerCount; layer += 1) {
+      const layerRadius = radius * (0.2 + (layer / layerCount) * 0.72);
+      ctx.beginPath();
+      for (let index = 0; index <= spokeCount; index += 1) {
+        const spokeIndex = index % spokeCount;
+        const angle = (Math.PI * 2 * spokeIndex) / spokeCount;
+        const wobble = 1 + 0.055 * Math.sin(spokeIndex * 1.91 + layer * 2.4 + variant);
+        const x = Math.cos(angle) * layerRadius * wobble;
+        const y = Math.sin(angle) * layerRadius * wobble;
+        if (index === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.beginPath();
+    ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   drawTargetHighlight(ctx) {
     if (!this.targetHold) {
       return;
@@ -6639,6 +6698,11 @@ class Game {
     const pulse = 1 + Math.sin(time) * 0.04;
     const targetScale = this.powerUps.magnifier > 0 ? 1.5 : 1;
     const ringRadius = (visualRadius + 14) * pulse * targetScale;
+    if (this.isSpiderWebEffectEnabled()) {
+      this.drawSpiderWebTargetRing(ctx, screen, ringRadius + 6, time);
+      return;
+    }
+    this.spiderWebTargetHoldId = null;
     const glowPulse = 0.72 + Math.sin(time * 1.35) * 0.16;
     const glowRadius = ringRadius + 20 * targetScale;
     const glow = ctx.createRadialGradient(screen.x, screen.y, ringRadius * 0.42, screen.x, screen.y, glowRadius);
