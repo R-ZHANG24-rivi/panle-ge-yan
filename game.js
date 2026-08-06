@@ -6653,7 +6653,7 @@ class Game {
     const anchor = anchors[variant];
     const image = asset.image;
     const pulse = 1 + Math.sin(time) * 0.025;
-    const targetDiameter = ringRadius * 2.45 * pulse;
+    const targetDiameter = ringRadius * 3.1 * pulse;
     const imageScale = targetDiameter / Math.max(image.naturalWidth, image.naturalHeight);
 
     ctx.save();
