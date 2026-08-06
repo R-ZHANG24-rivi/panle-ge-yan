@@ -429,8 +429,7 @@ const OUTFIT_PARTS = [
 ];
 const OUTFIT_OPTIONS = {
   hair: [
-    { id: "hair_01", label: "默认" },
-    { id: "hair_female", label: "长发" },
+    { id: "hair_01", label: "长发" },
     { id: "hair_male", label: "短发" }
   ],
   accessory: [
@@ -439,7 +438,6 @@ const OUTFIT_OPTIONS = {
   ],
   shirt: [
     { id: "shirt_01", label: "粉色" },
-    { id: "shirt_female", label: "蓝绿" },
     { id: "shirt_male", label: "青色" },
     { id: "shirt_spider", label: "蜘蛛战衣" }
   ],
@@ -2931,11 +2929,15 @@ class Game {
       }
       const parsed = JSON.parse(raw);
       const accessory = parsed.accessory || (parsed.glasses ? "glasses_01" : DEFAULT_OUTFIT.accessory);
-      const hair = parsed.hair === "hair_02" ? "hair_female" : parsed.hair;
+      const hair = parsed.hair === "hair_02" || parsed.hair === "hair_female"
+        ? "hair_01"
+        : parsed.hair;
       return {
         hair: this.isValidOutfitOption("hair", hair) ? hair : DEFAULT_OUTFIT.hair,
         accessory: this.isValidOutfitOption("accessory", accessory) ? accessory : DEFAULT_OUTFIT.accessory,
-        shirt: this.isValidOutfitOption("shirt", parsed.shirt) ? parsed.shirt : DEFAULT_OUTFIT.shirt,
+        shirt: this.isValidOutfitOption("shirt", parsed.shirt === "shirt_female" ? "shirt_01" : parsed.shirt)
+          ? (parsed.shirt === "shirt_female" ? "shirt_01" : parsed.shirt)
+          : DEFAULT_OUTFIT.shirt,
         pants: this.isValidOutfitOption("pants", parsed.pants) ? parsed.pants : DEFAULT_OUTFIT.pants,
         chalkBag: this.isValidOutfitOption("chalkBag", parsed.chalkBag) ? parsed.chalkBag : DEFAULT_OUTFIT.chalkBag,
         glasses: accessory === "glasses_01"
@@ -8506,7 +8508,7 @@ class Game {
     const y = 236;
     const w = 289;
     const h = 300;
-    const toggleRect = { x: x + 34, y: y + 174, w: w - 68, h: 52 };
+    const toggleRect = { x: x + 78, y: y + 164, w: 133, h: 62 };
     const confirmRect = { x: x + 74, y: y + 240, w: w - 148, h: 42 };
     this.uiPanel.bounds = { x, y, w, h };
     this.uiPanel.closeRect = { x: x + w - 48, y: y + 8, w: 40, h: 40 };
@@ -8539,12 +8541,25 @@ class Game {
     ctx.fillText("目标判定圈将随机变成白色蛛网", x + w / 2, y + 112);
 
     const enabled = this.spiderWebEffectUserEnabled;
-    ctx.fillStyle = enabled ? "#e63946" : "#82919b";
-    this.roundRect(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, 26);
+    ctx.fillStyle = enabled ? "#e63946" : "#f1f2f3";
+    this.roundRect(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, toggleRect.h / 2);
     ctx.fill();
+    const knobRadius = 25;
+    const knobX = enabled
+      ? toggleRect.x + toggleRect.w - toggleRect.h / 2
+      : toggleRect.x + toggleRect.h / 2;
+    const knobY = toggleRect.y + toggleRect.h / 2;
+    ctx.shadowColor = "rgba(20, 40, 55, 0.18)";
+    ctx.shadowBlur = 7;
+    ctx.shadowOffsetY = 2;
     ctx.fillStyle = "#ffffff";
-    setCanvasFont(ctx, "bold 17px Arial, Helvetica, sans-serif");
-    ctx.fillText(enabled ? "关闭蛛网特效" : "开启蛛网特效", x + w / 2, toggleRect.y + toggleRect.h / 2);
+    ctx.beginPath();
+    ctx.arc(knobX, knobY, knobRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.fillStyle = enabled ? "#e63946" : "#778995";
+    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
+    ctx.fillText(enabled ? "已开启" : "已关闭", x + w / 2, toggleRect.y + toggleRect.h + 20);
 
     ctx.strokeStyle = "rgba(94, 115, 129, 0.32)";
     ctx.lineWidth = 1.5;
