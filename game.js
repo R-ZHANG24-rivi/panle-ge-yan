@@ -419,6 +419,7 @@ const DEFAULT_OUTFIT = {
 };
 
 const OUTFIT_STORAGE_KEY = "ropeClimbJumpOutfit";
+const SPIDER_WEB_EFFECT_STORAGE_KEY = "panleGeYanSpiderWebEffectEnabled";
 const OUTFIT_PARTS = [
   { id: "hair", label: "发型" },
   { id: "accessory", label: "配饰" },
@@ -2804,6 +2805,8 @@ class Game {
     this.audio = new AudioManager(AUDIO_FILES);
     this.input = new InputController(canvas, this);
     this.outfit = this.loadOutfit();
+    this.spiderWebEffectUserEnabled = this.loadSpiderWebEffectPreference();
+    this.spiderWebEffectEligibilityWasActive = false;
     this.spiderWebEffect = typeof window.SpiderWebEffect === "function"
       ? new window.SpiderWebEffect({
         assetBase: gameAssetUrl("spider-web-effect"),
@@ -3020,8 +3023,44 @@ class Game {
     return Boolean(this.holdAssets && this.holdAssets.currentThemeId === "theme07");
   }
 
-  isSpiderWebEffectEnabled() {
+  isSpiderWebEffectEligible() {
     return this.isSpiderSuitEquipped() && this.isSpiderThemeActive();
+  }
+
+  isSpiderWebEffectEnabled() {
+    return this.isSpiderWebEffectEligible() && this.spiderWebEffectUserEnabled;
+  }
+
+  loadSpiderWebEffectPreference() {
+    try {
+      return window.localStorage.getItem(SPIDER_WEB_EFFECT_STORAGE_KEY) !== "0";
+    } catch (error) {
+      return true;
+    }
+  }
+
+  saveSpiderWebEffectPreference() {
+    try {
+      window.localStorage.setItem(
+        SPIDER_WEB_EFFECT_STORAGE_KEY,
+        this.spiderWebEffectUserEnabled ? "1" : "0"
+      );
+    } catch (error) {
+      // Storage may be disabled; keep the current session state.
+    }
+  }
+
+  checkSpiderWebEffectPrompt() {
+    const eligible = this.isSpiderWebEffectEligible();
+    if (eligible && !this.spiderWebEffectEligibilityWasActive) {
+      this.spiderWebEffectEligibilityWasActive = true;
+      this.uiPanel = { type: "spider-web-prompt" };
+      return;
+    }
+    if (!eligible) {
+      this.spiderWebEffectEligibilityWasActive = false;
+      this.clearSpiderWebEffect();
+    }
   }
 
   clearSpiderWebEffect() {
@@ -3101,6 +3140,7 @@ class Game {
     }
     this.outfit[part] = optionId;
     this.saveOutfit();
+    this.checkSpiderWebEffectPrompt();
     if (!this.isSpiderWebEffectEnabled()) {
       this.clearSpiderWebEffect();
     }
@@ -3323,6 +3363,7 @@ class Game {
       this.state = STATE.START;
       this.refreshOutfitBackdrop();
       this.showToast(`已切换岩点：${themeInfo.label}`);
+      this.checkSpiderWebEffectPrompt();
     } finally {
       this.outfitThemeLoadingId = null;
       this.themeSwitchPending = false;
@@ -3965,6 +4006,23 @@ class Game {
       this.uiPanel = null;
       this.outfitBackdrop = null;
       this.lastOutfitRenderTime = 0;
+      return;
+    }
+    if (id === "spider-web-toggle") {
+      this.spiderWebEffectUserEnabled = !this.spiderWebEffectUserEnabled;
+      this.saveSpiderWebEffectPreference();
+      if (!this.spiderWebEffectUserEnabled) {
+        this.clearSpiderWebEffect();
+      }
+      this.showToast(this.spiderWebEffectUserEnabled ? "蛛网特效已开启" : "蛛网特效已关闭");
+      reportQuwanEvent("spider_web_toggle", {
+        enabled: this.spiderWebEffectUserEnabled ? 1 : 0
+      });
+      return;
+    }
+    if (id === "spider-web-confirm") {
+      this.uiPanel = null;
+      return;
     }
     if (id === "open-news-app") {
       this.triggerAppLaunchForRanking();
@@ -8443,6 +8501,73 @@ class Game {
     ctx.restore();
   }
 
+  drawSpiderWebPrompt(ctx) {
+    const x = 43;
+    const y = 236;
+    const w = 289;
+    const h = 300;
+    const toggleRect = { x: x + 34, y: y + 174, w: w - 68, h: 52 };
+    const confirmRect = { x: x + 74, y: y + 240, w: w - 148, h: 42 };
+    this.uiPanel.bounds = { x, y, w, h };
+    this.uiPanel.closeRect = { x: x + w - 48, y: y + 8, w: 40, h: 40 };
+    this.uiPanel.buttons = [
+      { id: "spider-web-toggle", ...toggleRect },
+      { id: "spider-web-confirm", ...confirmRect }
+    ];
+
+    ctx.save();
+    ctx.fillStyle = "rgba(10, 25, 36, 0.5)";
+    ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
+
+    ctx.shadowColor = "rgba(11, 31, 46, 0.3)";
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetY = 9;
+    ctx.fillStyle = "rgba(249, 252, 254, 0.99)";
+    this.roundRect(ctx, x, y, w, h, 22);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#152d40";
+    setCanvasFont(ctx, "900 24px Arial, Helvetica, sans-serif");
+    ctx.fillText("蜘蛛侠特效已解锁", x + w / 2, y + 48);
+
+    ctx.fillStyle = "#617381";
+    setCanvasFont(ctx, "15px Arial, Helvetica, sans-serif");
+    ctx.fillText("蜘蛛侠套装与暗夜极限主题已集齐", x + w / 2, y + 87);
+    ctx.fillText("目标判定圈将随机变成白色蛛网", x + w / 2, y + 112);
+
+    const enabled = this.spiderWebEffectUserEnabled;
+    ctx.fillStyle = enabled ? "#e63946" : "#82919b";
+    this.roundRect(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, 26);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    setCanvasFont(ctx, "bold 17px Arial, Helvetica, sans-serif");
+    ctx.fillText(enabled ? "关闭蛛网特效" : "开启蛛网特效", x + w / 2, toggleRect.y + toggleRect.h / 2);
+
+    ctx.strokeStyle = "rgba(94, 115, 129, 0.32)";
+    ctx.lineWidth = 1.5;
+    this.roundRect(ctx, confirmRect.x, confirmRect.y, confirmRect.w, confirmRect.h, 21);
+    ctx.stroke();
+    ctx.fillStyle = "#526875";
+    setCanvasFont(ctx, "bold 15px Arial, Helvetica, sans-serif");
+    ctx.fillText("知道了", x + w / 2, confirmRect.y + confirmRect.h / 2);
+
+    const closeX = this.uiPanel.closeRect.x + this.uiPanel.closeRect.w / 2;
+    const closeY = this.uiPanel.closeRect.y + this.uiPanel.closeRect.h / 2;
+    ctx.strokeStyle = "#7b8c96";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(closeX - 6, closeY - 6);
+    ctx.lineTo(closeX + 6, closeY + 6);
+    ctx.moveTo(closeX + 6, closeY - 6);
+    ctx.lineTo(closeX - 6, closeY + 6);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   drawUiPanel(ctx) {
     if (this.uiPanel.type === "outfit") {
       this.drawOutfitPanel(ctx);
@@ -8450,6 +8575,10 @@ class Game {
     }
     if (this.uiPanel.type === "rank") {
       this.drawLeaderboardPanel(ctx, false);
+      return;
+    }
+    if (this.uiPanel.type === "spider-web-prompt") {
+      this.drawSpiderWebPrompt(ctx);
       return;
     }
     return;
