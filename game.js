@@ -3059,6 +3059,7 @@ class Game {
       const returnPanel = this.uiPanel && this.uiPanel.type === "outfit"
         ? this.uiPanel
         : { type: "outfit" };
+      this.captureSpiderWebPromptPreviews();
       this.uiPanel = { type: "spider-web-prompt", returnPanel };
       return;
     }
@@ -3853,6 +3854,50 @@ class Game {
     this.leaderboardDrag = null;
   }
 
+  captureSpiderWebPromptPreviews() {
+    const previousPanel = this.uiPanel;
+    const previousEnabled = this.spiderWebEffectUserEnabled;
+    const previousState = this.state;
+    const previousTargetHold = this.targetHold;
+    const previousTargetVariant = this.spiderWebTargetVariant;
+    const previousTargetRotation = this.spiderWebTargetRotation;
+    const previousTargetHoldId = this.spiderWebTargetHoldId;
+    const previewHold = this.targetHold || this.currentHold || (this.generator && this.generator.holds[1]);
+    if (!previewHold) {
+      return;
+    }
+    const makePreview = (enabled) => {
+      this.uiPanel = null;
+      this.state = STATE.READY;
+      this.targetHold = previewHold;
+      this.spiderWebEffectUserEnabled = enabled;
+      if (enabled) {
+        this.spiderWebTargetHoldId = null;
+        this.spiderWebTargetVariant = 0;
+        this.spiderWebTargetRotation = -0.18;
+      }
+      this.draw();
+      this.spiderWebPromptPreviewCenter = this.worldToScreen(previewHold);
+      const preview = document.createElement("canvas");
+      preview.width = this.canvas.width;
+      preview.height = this.canvas.height;
+      preview.getContext("2d").drawImage(this.canvas, 0, 0);
+      return preview;
+    };
+    this.spiderWebPromptPreviews = {
+      disabled: makePreview(false),
+      enabled: makePreview(true)
+    };
+    this.spiderWebEffectUserEnabled = previousEnabled;
+    this.state = previousState;
+    this.targetHold = previousTargetHold;
+    this.spiderWebTargetVariant = previousTargetVariant;
+    this.spiderWebTargetRotation = previousTargetRotation;
+    this.spiderWebTargetHoldId = previousTargetHoldId;
+    this.uiPanel = previousPanel;
+    this.draw();
+  }
+
   closeSpiderWebPrompt() {
     if (!this.uiPanel || this.uiPanel.type !== "spider-web-prompt") {
       return;
@@ -4039,10 +4084,6 @@ class Game {
       reportQuwanEvent("spider_web_toggle", {
         enabled: this.spiderWebEffectUserEnabled ? 1 : 0
       });
-      return;
-    }
-    if (id === "spider-web-confirm") {
-      this.closeSpiderWebPrompt();
       return;
     }
     if (id === "open-news-app") {
@@ -8523,99 +8564,92 @@ class Game {
   }
 
   drawSpiderWebPrompt(ctx) {
-    const x = 60;
-    const y = 262;
-    const w = 255;
-    const h = 278;
-    const toggleRect = { x: x + 92, y: y + 197, w: 71, h: 34 };
-    const confirmRect = { x: x + 80, y: y + 238, w: 95, h: 30 };
+    const x = 56;
+    const y = 265;
+    const w = 263;
+    const h = 248;
+    const toggleRect = { x: x + 106, y: y + 202, w: 51, h: 26 };
     this.uiPanel.bounds = { x, y, w, h };
-    this.uiPanel.closeRect = { x: x + w - 40, y: y + 5, w: 34, h: 34 };
-    this.uiPanel.buttons = [
-      { id: "spider-web-toggle", ...toggleRect },
-      { id: "spider-web-confirm", ...confirmRect }
-    ];
+    this.uiPanel.closeRect = { x: x + w - 35, y: y + 5, w: 30, h: 30 };
+    this.uiPanel.buttons = [{ id: "spider-web-toggle", ...toggleRect }];
 
     ctx.save();
     ctx.fillStyle = "rgba(10, 25, 36, 0.42)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-    ctx.shadowColor = "rgba(11, 31, 46, 0.26)";
-    ctx.shadowBlur = 17;
-    ctx.shadowOffsetY = 7;
+    ctx.shadowColor = "rgba(11, 31, 46, 0.24)";
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 6;
     ctx.fillStyle = "rgba(249, 252, 254, 0.99)";
-    this.roundRect(ctx, x, y, w, h, 19);
+    this.roundRect(ctx, x, y, w, h, 18);
     ctx.fill();
     ctx.shadowColor = "transparent";
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#152d40";
-    setCanvasFont(ctx, "900 19px Arial, Helvetica, sans-serif");
-    ctx.fillText("蜘蛛侠特效已解锁", x + w / 2, y + 34);
+    setCanvasFont(ctx, "900 18px Arial, Helvetica, sans-serif");
+    ctx.fillText("蜘蛛侠特效已解锁", x + w / 2, y + 31);
     ctx.fillStyle = "#617381";
-    setCanvasFont(ctx, "12px Arial, Helvetica, sans-serif");
-    ctx.fillText("开启后，黄色判定圈会变成随机蛛网", x + w / 2, y + 59);
+    setCanvasFont(ctx, "11px Arial, Helvetica, sans-serif");
+    ctx.fillText("目标判定效果", x + w / 2, y + 53);
 
-    const previewY = y + 124;
-    const previewCenters = [x + 70, x + 185];
-    const drawHold = (cx) => {
+    const previewW = 108;
+    const previewH = 119;
+    const previewY = y + 69;
+    const previewXs = [x + 17, x + 138];
+    const previews = this.spiderWebPromptPreviews || {};
+    const sourceCenter = this.spiderWebPromptPreviewCenter || { x: CONFIG.logicalWidth / 2, y: CONFIG.logicalHeight / 2 };
+    const sourceSize = 150;
+    const sourceX = clamp(sourceCenter.x - sourceSize / 2, 0, CONFIG.logicalWidth - sourceSize);
+    const sourceY = clamp(sourceCenter.y - sourceSize / 2, 0, CONFIG.logicalHeight - sourceSize);
+    const drawPreview = (image, px, label) => {
       ctx.save();
-      ctx.translate(cx, previewY);
-      ctx.rotate(-0.18);
-      ctx.fillStyle = "#596872";
-      ctx.beginPath();
-      ctx.ellipse(0, 0, 15, 10, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.26)";
-      ctx.beginPath();
-      ctx.ellipse(-4, -3, 6, 3, -0.15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    };
-
-    drawHold(previewCenters[0]);
-    ctx.strokeStyle = "rgba(255, 212, 0, 0.92)";
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(previewCenters[0], previewY, 32, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#7a8992";
-    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
-    ctx.fillText("关闭", previewCenters[0], previewY + 48);
-
-    drawHold(previewCenters[1]);
-    const webAsset = this.spiderWebTargetAssets && this.spiderWebTargetAssets.web1;
-    if (webAsset && webAsset.loaded && !webAsset.failed && webAsset.image.complete) {
-      ctx.save();
-      ctx.globalAlpha = 1;
-      ctx.drawImage(webAsset.image, previewCenters[1] - 38, previewY - 38, 76, 76);
-      ctx.restore();
-    } else {
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      for (let index = 0; index < 8; index += 1) {
-        const angle = index * Math.PI / 4;
-        ctx.beginPath();
-        ctx.moveTo(previewCenters[1], previewY);
-        ctx.lineTo(previewCenters[1] + Math.cos(angle) * 34, previewY + Math.sin(angle) * 34);
-        ctx.stroke();
+      this.roundRect(ctx, px, previewY, previewW, previewH, 12);
+      ctx.clip();
+      if (image) {
+        ctx.drawImage(
+          image,
+          sourceX * (image.width / CONFIG.logicalWidth),
+          sourceY * (image.height / CONFIG.logicalHeight),
+          sourceSize * (image.width / CONFIG.logicalWidth),
+          sourceSize * (image.height / CONFIG.logicalHeight),
+          px,
+          previewY,
+          previewW,
+          previewH
+        );
+      } else {
+        ctx.fillStyle = "#243b4b";
+        ctx.fillRect(px, previewY, previewW, previewH);
       }
-    }
-    ctx.fillStyle = "#7a8992";
-    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
-    ctx.fillText("开启", previewCenters[1], previewY + 48);
+      const gradient = ctx.createLinearGradient(0, previewY + 76, 0, previewY + previewH);
+      gradient.addColorStop(0, "rgba(8, 20, 29, 0)");
+      gradient.addColorStop(1, "rgba(8, 20, 29, 0.72)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(px, previewY, previewW, previewH);
+      ctx.fillStyle = "#ffffff";
+      setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
+      ctx.fillText(label, px + previewW / 2, previewY + previewH - 13);
+      ctx.restore();
+      ctx.strokeStyle = "rgba(23, 50, 67, 0.14)";
+      ctx.lineWidth = 1;
+      this.roundRect(ctx, px, previewY, previewW, previewH, 12);
+      ctx.stroke();
+    };
+    drawPreview(previews.disabled, previewXs[0], "关闭");
+    drawPreview(previews.enabled, previewXs[1], "开启");
 
     const enabled = this.spiderWebEffectUserEnabled;
-    ctx.fillStyle = enabled ? "#e63946" : "#e1e4e6";
+    ctx.fillStyle = enabled ? "#e63946" : "#d8dde0";
     this.roundRect(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, toggleRect.h / 2);
     ctx.fill();
-    const knobRadius = 14;
+    const knobRadius = 10;
     const knobX = enabled
       ? toggleRect.x + toggleRect.w - toggleRect.h / 2
       : toggleRect.x + toggleRect.h / 2;
     const knobY = toggleRect.y + toggleRect.h / 2;
-    ctx.shadowColor = "rgba(20, 40, 55, 0.16)";
-    ctx.shadowBlur = 5;
+    ctx.shadowColor = "rgba(20, 40, 55, 0.18)";
+    ctx.shadowBlur = 4;
     ctx.shadowOffsetY = 1;
     ctx.fillStyle = "#ffffff";
     ctx.beginPath();
@@ -8623,24 +8657,16 @@ class Game {
     ctx.fill();
     ctx.shadowColor = "transparent";
 
-    ctx.strokeStyle = "rgba(94, 115, 129, 0.3)";
-    ctx.lineWidth = 1.2;
-    this.roundRect(ctx, confirmRect.x, confirmRect.y, confirmRect.w, confirmRect.h, 15);
-    ctx.stroke();
-    ctx.fillStyle = "#526875";
-    setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
-    ctx.fillText("知道了", x + w / 2, confirmRect.y + confirmRect.h / 2);
-
     const closeX = this.uiPanel.closeRect.x + this.uiPanel.closeRect.w / 2;
     const closeY = this.uiPanel.closeRect.y + this.uiPanel.closeRect.h / 2;
     ctx.strokeStyle = "#7b8c96";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.8;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(closeX - 5, closeY - 5);
-    ctx.lineTo(closeX + 5, closeY + 5);
-    ctx.moveTo(closeX + 5, closeY - 5);
-    ctx.lineTo(closeX - 5, closeY + 5);
+    ctx.moveTo(closeX - 4.5, closeY - 4.5);
+    ctx.lineTo(closeX + 4.5, closeY + 4.5);
+    ctx.moveTo(closeX + 4.5, closeY - 4.5);
+    ctx.lineTo(closeX - 4.5, closeY + 4.5);
     ctx.stroke();
     ctx.restore();
   }
