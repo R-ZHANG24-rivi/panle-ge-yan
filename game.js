@@ -421,6 +421,53 @@ const DEFAULT_OUTFIT = {
 const OUTFIT_STORAGE_KEY = "ropeClimbJumpOutfit";
 const SPIDER_WEB_EFFECT_STORAGE_KEY = "panleGeYanSpiderWebEffectEnabled";
 const LIMITED_SKIN_STORAGE_KEY = "panleGeYanLimitedSkinProgress";
+const ACHIEVEMENT_STORAGE_KEY = "panleGeYanAchievements";
+const ACHIEVEMENT_CONFIG = [
+  { id: "height_10",    height: 10,     name: "越过长城",   landmark: "长城城墙",   badge: "badge_10m" },
+  { id: "height_20",    height: 20,     name: "洞庭登楼",   landmark: "岳阳楼",     badge: "badge_20m" },
+  { id: "height_30",    height: 30,     name: "钟楼在望",   landmark: "西安钟楼",   badge: "badge_30m" },
+  { id: "height_50",    height: 50,     name: "黄鹤云归",   landmark: "黄鹤楼",     badge: "badge_50m" },
+  { id: "height_100",   height: 100,    name: "南海之愿",   landmark: "南山海上观音", badge: "badge_100m" },
+  { id: "height_200",   height: 200,    name: "穿越天窗",   landmark: "央视总部大楼", badge: "badge_200m" },
+  { id: "height_301",   height: 301.8,  name: "云门已开",   landmark: "苏州东方之门", badge: "badge_301m" },
+  { id: "height_367",   height: 367.4,  name: "竹节凌云",   landmark: "香港中银大厦", badge: "badge_367m" },
+  { id: "height_468",   height: 468,    name: "明珠入云",   landmark: "上海东方明珠", badge: "badge_468m" },
+  { id: "height_528",   height: 528,    name: "尊临京城",   landmark: "北京中国尊",   badge: "badge_528m" },
+  { id: "height_600",   height: 600,    name: "小蛮腰之巅",  landmark: "广州塔",     badge: "badge_600m" },
+  { id: "height_632",   height: 632,    name: "上海之巅",   landmark: "上海中心大厦", badge: "badge_632m" },
+  { id: "height_1533",  height: 1533,   name: "五岳独尊",   landmark: "泰山",       badge: "badge_1533m" },
+  { id: "height_2155",  height: 2155,   name: "太华绝顶",   landmark: "华山",       badge: "badge_2155m" },
+  { id: "height_3079",  height: 3079,   name: "金顶佛光",   landmark: "峨眉山",     badge: "badge_3079m" },
+  { id: "height_5596",  height: 5596,   name: "玉龙腾雪",   landmark: "玉龙雪山",   badge: "badge_5596m" },
+  { id: "height_6247",  height: 6247.8, name: "蜀山皇后",   landmark: "四姑娘山",   badge: "badge_6247m" },
+  { id: "height_6740",  height: 6740,   name: "日照金山",   landmark: "梅里雪山",   badge: "badge_6740m" },
+  { id: "height_7508",  height: 7508.9, name: "蜀山之王",   landmark: "贡嘎山",     badge: "badge_7508m" },
+  { id: "height_8611",  height: 8611,   name: "第二极峰",   landmark: "乔戈里峰",   badge: "badge_8611m" },
+  { id: "height_8848",  height: 8848.86,name: "世界之巅",   landmark: "珠穆朗玛峰", badge: "badge_8848m" }
+];
+const ACHIEVEMENT_ASSET_FILES = resolveGameAssetMap({
+  badge_10m:   "ui/achievements/badge_10m.png?v=20260818-achievements",
+  badge_20m:   "ui/achievements/badge_20m.png?v=20260818-achievements",
+  badge_30m:   "ui/achievements/badge_30m.png?v=20260818-achievements",
+  badge_50m:   "ui/achievements/badge_50m.png?v=20260818-achievements",
+  badge_100m:  "ui/achievements/badge_100m.png?v=20260818-achievements",
+  badge_200m:  "ui/achievements/badge_200m.png?v=20260818-achievements",
+  badge_301m:  "ui/achievements/badge_301m.png?v=20260818-achievements",
+  badge_367m:  "ui/achievements/badge_367m.png?v=20260818-achievements",
+  badge_468m:  "ui/achievements/badge_468m.png?v=20260818-achievements",
+  badge_528m:  "ui/achievements/badge_528m.png?v=20260818-achievements",
+  badge_600m:  "ui/achievements/badge_600m.png?v=20260818-achievements",
+  badge_632m:  "ui/achievements/badge_632m.png?v=20260818-achievements",
+  badge_1533m: "ui/achievements/badge_1533m.png?v=20260818-achievements",
+  badge_2155m: "ui/achievements/badge_2155m.png?v=20260818-achievements",
+  badge_3079m: "ui/achievements/badge_3079m.png?v=20260818-achievements",
+  badge_5596m: "ui/achievements/badge_5596m.png?v=20260818-achievements",
+  badge_6247m: "ui/achievements/badge_6247m.png?v=20260818-achievements",
+  badge_6740m: "ui/achievements/badge_6740m.png?v=20260818-achievements",
+  badge_7508m: "ui/achievements/badge_7508m.png?v=20260818-achievements",
+  badge_8611m: "ui/achievements/badge_8611m.png?v=20260818-achievements",
+  badge_8848m: "ui/achievements/badge_8848m.png?v=20260818-achievements"
+});
 const LIMITED_SKIN_ITEMS = {
   shirt_spider: { cost: 5, label: "蜘蛛战衣", part: "shirt" },
   pants_navy: { cost: 5, label: "深蓝下装", part: "pants" },
@@ -2792,6 +2839,11 @@ class Game {
     this.camera = new Camera();
     this.player = new Player();
     this.limitedSkinProgress = this.loadLimitedSkinProgress();
+    this.achievementUnlocked = this.loadAchievements();
+    this.achievementUnlockQueue = [];
+    this.achievementUnlockNotification = null;
+    this.achievementUnlockTimer = 0;
+    this.achievementAssets = this.loadAchievementAssets();
     if (!this.isLimitedSkinUnlocked("theme07")) {
       try {
         if (window.localStorage.getItem(HOLD_THEME_STORAGE_KEY) === "theme07") {
@@ -2984,6 +3036,136 @@ class Game {
     } catch (error) {
       // Storage may be disabled; progress still works for the current session.
     }
+  }
+
+  loadAchievementAssets() {
+    return this.loadImageAssetMap(ACHIEVEMENT_ASSET_FILES);
+  }
+
+  loadAchievements() {
+    const fallback = {};
+    try {
+      const raw = window.localStorage.getItem(ACHIEVEMENT_STORAGE_KEY);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? { ...parsed } : fallback;
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  saveAchievements() {
+    try {
+      window.localStorage.setItem(ACHIEVEMENT_STORAGE_KEY, JSON.stringify(this.achievementUnlocked));
+    } catch (error) {
+      // Storage may be disabled.
+    }
+  }
+
+  isAchievementUnlocked(achievementId) {
+    return Boolean(this.achievementUnlocked[achievementId]);
+  }
+
+  getUnlockedCount() {
+    return Object.keys(this.achievementUnlocked).filter(id => this.achievementUnlocked[id]).length;
+  }
+
+  checkAndUnlockAchievements(currentHeightMeters) {
+    const newlyUnlocked = [];
+    for (const ach of ACHIEVEMENT_CONFIG) {
+      if (!this.achievementUnlocked[ach.id] && currentHeightMeters >= ach.height) {
+        this.achievementUnlocked[ach.id] = true;
+        newlyUnlocked.push(ach);
+      }
+    }
+    if (newlyUnlocked.length > 0) {
+      this.saveAchievements();
+      for (const ach of newlyUnlocked) {
+        this.achievementUnlockQueue.push(ach);
+      }
+      if (!this.achievementUnlockNotification) {
+        this.showNextAchievementUnlock();
+      }
+    }
+  }
+
+  showNextAchievementUnlock() {
+    const ach = this.achievementUnlockQueue.shift();
+    if (!ach) {
+      this.achievementUnlockNotification = null;
+      return;
+    }
+    this.achievementUnlockNotification = { achievement: ach, timer: 0, duration: 2.8 };
+    reportQuwanEvent("achievement_unlock", { achievement_id: ach.id, height: ach.height });
+  }
+
+  updateAchievementUnlockNotification(deltaTime) {
+    if (!this.achievementUnlockNotification) return;
+    this.achievementUnlockNotification.timer += deltaTime;
+    if (this.achievementUnlockNotification.timer >= this.achievementUnlockNotification.duration) {
+      this.showNextAchievementUnlock();
+    }
+  }
+
+  drawAchievementUnlockNotification(ctx) {
+    const n = this.achievementUnlockNotification;
+    if (!n) return;
+    const ach = n.achievement;
+    const progress = Math.min(1, n.timer / 0.5);
+    const easeOut = 1 - Math.pow(1 - progress, 3);
+    const alpha = Math.min(1, n.timer * 3);
+
+    const boxW = 220;
+    const boxH = 70;
+    const boxX = (CONFIG.logicalWidth - boxW) / 2;
+    const boxY = 140 + (1 - easeOut) * 30;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    ctx.shadowColor = "rgba(0,0,0,0.18)";
+    ctx.shadowBlur = 14;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "rgba(255,252,245,0.97)";
+    this.roundRect(ctx, boxX, boxY, boxW, boxH, 14);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+
+    ctx.strokeStyle = "rgba(218,165,32,0.7)";
+    ctx.lineWidth = 2;
+    this.roundRect(ctx, boxX, boxY, boxW, boxH, 14);
+    ctx.stroke();
+
+    const badgeSize = 48;
+    const badgeX = boxX + 14;
+    const badgeY = boxY + (boxH - badgeSize) / 2;
+    const badgeAsset = this.achievementAssets[ach.badge];
+    if (badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
+      ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
+    } else {
+      ctx.fillStyle = "#e8d4a8";
+      this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 10);
+      ctx.fill();
+    }
+
+    const textX = badgeX + badgeSize + 14;
+    const textY = boxY + 18;
+
+    ctx.fillStyle = "#d4a843";
+    setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("成就解锁", textX, textY);
+
+    ctx.fillStyle = "#333";
+    setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
+    ctx.fillText(ach.name, textX, textY + 18);
+
+    ctx.fillStyle = "#888";
+    setCanvasFont(ctx, "11px Arial, Helvetica, sans-serif");
+    ctx.fillText(`${ach.height}m · ${ach.landmark}`, textX, textY + 38);
+
+    ctx.restore();
   }
 
   isLimitedSkinItem(optionId) {
@@ -3295,7 +3477,8 @@ class Game {
       ...Object.values(this.playerAssets.assets),
       ...Object.values(this.uiIconAssets),
       ...Object.values(this.feedbackAssets),
-      ...Object.values(this.figmaUiAssets)
+      ...Object.values(this.figmaUiAssets),
+      ...Object.values(this.achievementAssets)
     ];
     const tasks = [
       () => this.holdAssets.readyPromise,
@@ -3702,6 +3885,7 @@ class Game {
         this.uiToast = null;
       }
     }
+    this.updateAchievementUnlockNotification(deltaTime);
     if (this.rocketHintTimer > 0) {
       this.rocketHintTimer = Math.max(0, this.rocketHintTimer - deltaTime);
     }
@@ -4142,8 +4326,8 @@ class Game {
       this.uiPanel = { type: "outfit" };
       return;
     }
-    if (id === "outfit-tab-clothes" || id === "outfit-tab-holds") {
-      this.outfitPanelTab = id === "outfit-tab-holds" ? "holds" : "clothes";
+    if (id === "outfit-tab-clothes" || id === "outfit-tab-holds" || id === "outfit-tab-achievements") {
+      this.outfitPanelTab = id === "outfit-tab-holds" ? "holds" : id === "outfit-tab-achievements" ? "achievements" : "clothes";
       return;
     }
     if (id.startsWith("outfit-hold-theme-")) {
@@ -4570,6 +4754,7 @@ class Game {
     }
     this.holdCount += 1;
     this.addClimbHeightForDistance(this.pendingAttempt.targetDistance);
+    this.checkAndUnlockAchievements(this.climbHeight / CONFIG.pixelsPerMeter);
     reportQuwanEvent("grab_success", {
       score: this.score,
       hold_count: this.holdCount,
@@ -4883,6 +5068,7 @@ class Game {
     }
     this.holdCount += 1;
     this.addClimbHeightForDistance(this.pendingAttempt.targetDistance);
+    this.checkAndUnlockAchievements(this.climbHeight / CONFIG.pixelsPerMeter);
     this.audio.playSfx("grabSuccess", { playbackRate: 1.16, volume: 0.42 });
     // 火箭自动攀爬没有精准度评级，普通抓点按 0.3，道具仍优先按 0.6。
     if (window.qqNewsHaptics) {
@@ -5830,6 +6016,7 @@ class Game {
     if (this.uiToast) {
       this.drawToast(ctx);
     }
+    this.drawAchievementUnlockNotification(ctx);
     if (DEBUG) {
       this.drawDebug(ctx);
     }
@@ -9513,7 +9700,7 @@ class Game {
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#5f6c72";
     setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
-    ctx.fillText(this.outfitPanelTab === "holds" ? "岩点预览" : "角色预览", x + 92, y + 27);
+    ctx.fillText(this.outfitPanelTab === "holds" ? "岩点预览" : this.outfitPanelTab === "achievements" ? "成就墙" : "角色预览", x + 92, y + 27);
     ctx.fillStyle = "#c9244d";
     setCanvasFont(ctx, "900 12px Arial, Helvetica, sans-serif");
     ctx.fillText(`限定碎片 ×${this.limitedSkinProgress.fragments}`, x + 92, y + 49);
@@ -9525,6 +9712,11 @@ class Game {
 
     if (this.outfitPanelTab === "holds") {
       this.drawOutfitHoldThemeOptions(ctx, x + 183, y + 58);
+      return;
+    }
+
+    if (this.outfitPanelTab === "achievements") {
+      this.drawAchievementWall(ctx, x + 178, y + 52, x + w - 10, y + h - 10);
       return;
     }
 
@@ -9556,9 +9748,10 @@ class Game {
   drawOutfitPanelTabs(ctx, x, y) {
     const tabs = [
       { id: "clothes", label: "服装" },
-      { id: "holds", label: "岩点" }
+      { id: "holds", label: "岩点" },
+      { id: "achievements", label: "成就" }
     ];
-    const tabW = 62;
+    const tabW = 58;
     const tabH = 32;
     tabs.forEach((tab, index) => {
       const tabX = x + index * (tabW + 5);
@@ -9638,6 +9831,119 @@ class Game {
       setCanvasFont(ctx, "900 10px Arial, Helvetica, sans-serif");
       ctx.fillText(redeemable ? "可兑换" : `🔒 ${limitedItem.cost}碎片`, x + w / 2, y + 78);
     }
+    ctx.restore();
+  }
+
+  drawAchievementWall(ctx, left, top, right, bottom) {
+    const cols = 6;
+    const cardW = 64;
+    const cardH = 78;
+    const gapX = 8;
+    const gapY = 8;
+    const startX = left + 4;
+    const startY = top + 4;
+    const unlockedCount = this.getUnlockedCount();
+
+    // Find the next locked achievement (lowest height not yet unlocked)
+    let nextLocked = null;
+    for (const ach of ACHIEVEMENT_CONFIG) {
+      if (!this.isAchievementUnlocked(ach.id)) { nextLocked = ach; break; }
+    }
+
+    ctx.save();
+    ctx.fillStyle = "rgba(250,252,254,0.6)";
+    setCanvasFont(ctx, "12px Arial, Helvetica, sans-serif");
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(`已解锁 ${unlockedCount} / ${ACHIEVEMENT_CONFIG.length}`, startX, startY);
+    if (nextLocked) {
+      ctx.fillStyle = "#c77c3b";
+      setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
+      const nextH = nextLocked.height >= 1000 ? (nextLocked.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : nextLocked.height + 'm';
+      ctx.fillText(`下一个: ${nextH} ${nextLocked.name}`, startX, startY + 16);
+    }
+    const headerY = startY + (nextLocked ? 32 : 18);
+
+    ACHIEVEMENT_CONFIG.forEach((ach, index) => {
+      const col = index % cols;
+      const row = Math.floor(index / cols);
+      const cardX = startX + col * (cardW + gapX);
+      const cardY = headerY + row * (cardH + gapY);
+      const unlocked = this.isAchievementUnlocked(ach.id);
+      const isNext = nextLocked && nextLocked.id === ach.id;
+
+      ctx.save();
+      if (unlocked) {
+        ctx.fillStyle = "rgba(255,250,240,0.95)";
+        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(218,165,32,0.45)";
+        ctx.lineWidth = 1.2;
+        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "rgba(242,244,246,0.95)";
+        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(190,196,200,0.35)";
+        ctx.lineWidth = 1;
+        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
+        ctx.stroke();
+      }
+
+      const badgeSize = 46;
+      const badgeX = cardX + (cardW - badgeSize) / 2;
+      const badgeY = cardY + 5;
+      const badgeAsset = this.achievementAssets[ach.badge];
+
+      if (unlocked && badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
+        ctx.globalAlpha = 1;
+        ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
+      } else if (badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
+        // Locked: grayscale the entire badge image
+        ctx.globalAlpha = 1;
+        ctx.save();
+        ctx.beginPath();
+        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 6);
+        ctx.clip();
+        ctx.filter = "grayscale(1) brightness(1.15)";
+        ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
+        ctx.filter = "none";
+        ctx.restore();
+        // Add a subtle lock overlay
+        ctx.fillStyle = "rgba(0,0,0,0.12)";
+        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 6);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = unlocked ? "#e8d4a8" : "#d8dce0";
+        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 8);
+        ctx.fill();
+      }
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      if (unlocked) {
+        ctx.fillStyle = "#333";
+        setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
+        const displayName = ach.name.length > 5 ? ach.name.slice(0, 4) + ".." : ach.name;
+        ctx.fillText(displayName, cardX + cardW / 2, cardY + badgeSize + 13);
+
+        ctx.fillStyle = "#888";
+        setCanvasFont(ctx, "9px Arial, Helvetica, sans-serif");
+        const hText = ach.height >= 1000 ? (ach.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : ach.height + 'm';
+        ctx.fillText(hText, cardX + cardW / 2, cardY + badgeSize + 26);
+      } else if (isNext) {
+        // Next-to-unlock: show height hint in orange
+        ctx.fillStyle = "#e87d2b";
+        setCanvasFont(ctx, "bold 9px Arial, Helvetica, sans-serif");
+        const hText = ach.height >= 1000 ? (ach.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : ach.height + 'm';
+        ctx.fillText(hText, cardX + cardW / 2, cardY + badgeSize + 14);
+      }
+      // Other locked badges: no text at all (purely gray silhouette)
+
+      ctx.restore();
+    });
+
     ctx.restore();
   }
 
