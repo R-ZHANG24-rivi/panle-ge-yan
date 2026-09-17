@@ -362,6 +362,7 @@ const UI_ICON_FILES = resolveGameAssetMap({
 });
 
 const FIGMA_UI_ASSET_FILES = resolveGameAssetMap({
+  limitedFragment: "ui/limited-fragment.png?v=20260917",
   coverTitle: "ui/figma/cover_title.png?v=20260712-figma-cover-1",
   startButton: "ui/figma/btn_start_base.png?v=20260721-code-labels-1",
   outfitButton: "ui/figma/btn_outfit_icon.png?v=20260721-code-labels-1",
@@ -3095,12 +3096,12 @@ class Game {
       this.achievementUnlockNotification = null;
       return;
     }
-    this.achievementUnlockNotification = { achievement: ach, timer: 0, duration: 2.8 };
+    this.achievementUnlockNotification = { achievement: ach, timer: 0, duration: 3.6 };
     reportQuwanEvent("achievement_unlock", { achievement_id: ach.id, height: ach.height });
   }
 
   updateAchievementUnlockNotification(deltaTime) {
-    if (!this.achievementUnlockNotification) return;
+    if (!this.achievementUnlockNotification || this.uiPanel) return;
     this.achievementUnlockNotification.timer += deltaTime;
     if (this.achievementUnlockNotification.timer >= this.achievementUnlockNotification.duration) {
       this.showNextAchievementUnlock();
@@ -3109,62 +3110,61 @@ class Game {
 
   drawAchievementUnlockNotification(ctx) {
     const n = this.achievementUnlockNotification;
-    if (!n) return;
+    if (!n || this.uiPanel) return;
     const ach = n.achievement;
-    const progress = Math.min(1, n.timer / 0.5);
-    const easeOut = 1 - Math.pow(1 - progress, 3);
-    const alpha = Math.min(1, n.timer * 3);
-
-    const boxW = 220;
-    const boxH = 70;
-    const boxX = (CONFIG.logicalWidth - boxW) / 2;
-    const boxY = 140 + (1 - easeOut) * 30;
-
+    const enter = Math.min(1, n.timer / 0.38);
+    const exit = clamp((n.duration - n.timer) / 0.35, 0, 1);
+    const ease = 1 - Math.pow(1 - enter, 3);
+    const w = CONFIG.logicalWidth - 48;
+    const h = 108;
+    const x = (CONFIG.logicalWidth - w) / 2;
+    const y = Math.max(158, CONFIG.safeTop + 118) - (1 - ease) * 14;
     ctx.save();
-    ctx.globalAlpha = alpha;
-
-    ctx.shadowColor = "rgba(0,0,0,0.18)";
-    ctx.shadowBlur = 14;
+    ctx.globalAlpha = enter * exit;
+    ctx.shadowColor = "rgba(36, 107, 140, 0.2)";
+    ctx.shadowBlur = 18;
     ctx.shadowOffsetY = 6;
-    ctx.fillStyle = "rgba(255,252,245,0.97)";
-    this.roundRect(ctx, boxX, boxY, boxW, boxH, 14);
+    const background = ctx.createLinearGradient(x, y, x + w, y + h);
+    background.addColorStop(0, "#edfaff");
+    background.addColorStop(1, "#ffffff");
+    ctx.fillStyle = background;
+    this.roundRect(ctx, x, y, w, h, 22);
     ctx.fill();
     ctx.shadowColor = "transparent";
-
-    ctx.strokeStyle = "rgba(218,165,32,0.7)";
-    ctx.lineWidth = 2;
-    this.roundRect(ctx, boxX, boxY, boxW, boxH, 14);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    const badgeSize = 48;
-    const badgeX = boxX + 14;
-    const badgeY = boxY + (boxH - badgeSize) / 2;
-    const badgeAsset = this.achievementAssets[ach.badge];
-    if (badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
-      ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
-    } else {
-      ctx.fillStyle = "#e8d4a8";
-      this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 10);
-      ctx.fill();
+    ctx.fillStyle = "#d6f3fb";
+    ctx.beginPath();
+    ctx.arc(x + 48, y + 53, 35, 0, Math.PI * 2);
+    ctx.fill();
+    const asset = this.achievementAssets[ach.badge];
+    if (asset && asset.loaded && asset.image.complete) {
+      const scale = 0.88 + 0.12 * ease;
+      const size = 68 * scale;
+      ctx.drawImage(asset.image, x + 48 - size / 2, y + 53 - size / 2, size, size);
     }
+    const textX = x + 96;
+    const textW = w - 112;
+    ctx.fillStyle = "#ffe4ed";
+    this.roundRect(ctx, textX, y + 13, 78, 21, 10.5);
+    ctx.fill();
+    this.drawOutfitText(ctx, "新成就解锁", textX + 39, y + 23.5, 70, 11, 600, "#bd4b76", "center");
+    this.drawOutfitText(ctx, ach.name, textX, y + 53, textW, 21, 700, "#267b9d");
+    this.drawOutfitText(ctx, `${ach.height}m · ${ach.landmark}`, textX, y + 80, textW, 12, 500, "#607c8b");
 
-    const textX = badgeX + badgeSize + 14;
-    const textY = boxY + 18;
-
-    ctx.fillStyle = "#d4a843";
-    setCanvasFont(ctx, "bold 12px Arial, Helvetica, sans-serif");
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText("成就解锁", textX, textY);
-
-    ctx.fillStyle = "#333";
-    setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
-    ctx.fillText(ach.name, textX, textY + 18);
-
-    ctx.fillStyle = "#888";
-    setCanvasFont(ctx, "11px Arial, Helvetica, sans-serif");
-    ctx.fillText(`${ach.height}m · ${ach.landmark}`, textX, textY + 38);
-
+    // Small four-point sparkles echo the bright, playful game artwork.
+    [[x + 20, y + 25, 4], [x + 80, y + 78, 3], [x + w - 20, y + 22, 4]].forEach(([sx, sy, r]) => {
+      ctx.fillStyle = "#77cee6";
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - r);
+      ctx.quadraticCurveTo(sx + 1, sy - 1, sx + r, sy);
+      ctx.quadraticCurveTo(sx + 1, sy + 1, sx, sy + r);
+      ctx.quadraticCurveTo(sx - 1, sy + 1, sx - r, sy);
+      ctx.quadraticCurveTo(sx - 1, sy - 1, sx, sy - r);
+      ctx.fill();
+    });
     ctx.restore();
   }
 
@@ -3649,14 +3649,15 @@ class Game {
         this.showToast("主题加载失败，请重试");
         return;
       }
-      this.resetGame({ tutorialEnabled: false });
-      this.charge = 0;
-      this.poseCharge = 0;
-      this.prepareStartDemoClimb();
-      this.state = STATE.START;
-      this.refreshOutfitBackdrop();
+      // Theme assets are visual only. Preserve the route, score, contacts and
+      // in-flight action so closing the wardrobe resumes the same round.
+      if (this.uiPanel && this.uiPanel.type === "outfit") {
+        this.refreshOutfitBackdrop();
+      }
       this.showToast(`已切换岩点：${themeInfo.label}`);
       this.checkSpiderWebEffectPrompt();
+    } catch (error) {
+      this.showToast("主题加载失败，请重试");
     } finally {
       this.outfitThemeLoadingId = null;
       this.themeSwitchPending = false;
@@ -4328,6 +4329,11 @@ class Game {
     }
     if (id === "outfit-tab-clothes" || id === "outfit-tab-holds" || id === "outfit-tab-achievements") {
       this.outfitPanelTab = id === "outfit-tab-holds" ? "holds" : id === "outfit-tab-achievements" ? "achievements" : "clothes";
+      return;
+    }
+    if (id === "outfit-achievements-prev" || id === "outfit-achievements-next") {
+      const pages = Math.ceil(ACHIEVEMENT_CONFIG.length / 9);
+      this.outfitAchievementPage = clamp((this.outfitAchievementPage || 0) + (id.endsWith("next") ? 1 : -1), 0, pages - 1);
       return;
     }
     if (id.startsWith("outfit-hold-theme-")) {
@@ -6990,35 +6996,27 @@ class Game {
       });
     }
   }
+  drawLimitedFragmentSprite(ctx, cx, cy, height) {
+    const asset = this.figmaUiAssets.limitedFragment;
+    if (!asset || !asset.loaded || !asset.image.complete) return;
+    // Use the supplied PNG unchanged, excluding its transparent canvas margins.
+    const width = height * 62 / 173;
+    ctx.drawImage(asset.image, 73, 14, 62, 173, cx - width / 2, cy - height / 2, width, height);
+  }
+
   drawLimitedFragmentIcons(ctx) {
     for (const hold of this.routeHolds) {
       if (!hold.limitedFragment) continue;
       const screen = this.worldToScreen(hold);
       if (screen.y < -90 || screen.y > CONFIG.logicalHeight + 90) continue;
       const time = performance.now() * 0.004;
-      const cy = screen.y - this.getHoldVisualRadius(hold) - 18 + Math.sin(time + hashNumber(hold.id)) * 3;
+      const cy = screen.y - this.getHoldVisualRadius(hold) - 23 + Math.sin(time + hashNumber(hold.id)) * 3;
       ctx.save();
       ctx.translate(screen.x, cy);
-      ctx.rotate(Math.sin(time * 0.7) * 0.18);
-      ctx.shadowColor = "rgba(255, 76, 110, 0.7)";
+      ctx.rotate(Math.sin(time * 0.7) * 0.12);
+      ctx.shadowColor = "rgba(57, 206, 255, 0.8)";
       ctx.shadowBlur = 10;
-      const gradient = ctx.createLinearGradient(-10, -12, 10, 12);
-      gradient.addColorStop(0, "#ff456d");
-      gradient.addColorStop(0.52, "#d7193f");
-      gradient.addColorStop(1, "#75152c");
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.moveTo(0, -13);
-      ctx.lineTo(11, -4);
-      ctx.lineTo(7, 11);
-      ctx.lineTo(-8, 9);
-      ctx.lineTo(-12, -3);
-      ctx.closePath();
-      ctx.fill();
-      ctx.shadowColor = "transparent";
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
+      this.drawLimitedFragmentSprite(ctx, 0, 0, 38);
       ctx.restore();
     }
   }
@@ -8313,31 +8311,19 @@ class Game {
 
   drawFragmentHud(ctx) {
     const count = this.limitedSkinProgress.fragments;
-    const x = CONFIG.safeSide + 4;
-    const y = CONFIG.safeTop + 18;
+    const x = CONFIG.safeSide;
+    const y = CONFIG.logicalHeight - CONFIG.safeBottom - 96;
     const pulse = 1 + (this.fragmentPickupPulse || 0) * 0.16;
     this.fragmentPickupPulse = Math.max(0, (this.fragmentPickupPulse || 0) - 0.035);
     ctx.save();
-    ctx.translate(x + 10, y);
-    ctx.scale(pulse, pulse);
-    ctx.fillStyle = "#e52d55";
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(8, -3);
-    ctx.lineTo(5, 8);
-    ctx.lineTo(-6, 7);
-    ctx.lineTo(-8, -2);
-    ctx.closePath();
+    ctx.fillStyle = "rgba(241, 251, 255, 0.96)";
+    this.roundRect(ctx, x, y - 17, 126, 34, 17);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.95)";
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
+    ctx.translate(x + 17, y);
+    ctx.scale(pulse, pulse);
+    this.drawLimitedFragmentSprite(ctx, 0, 0, 26);
     ctx.restore();
-    ctx.fillStyle = "rgba(255,255,255,0.98)";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    setCanvasFont(ctx, "900 14px Arial, Helvetica, sans-serif");
-    ctx.fillText(`限定碎片 ×${count}`, x + 25, y);
+    this.drawOutfitText(ctx, `限定碎片 ×${count}`, x + 31, y, 87, 12, 600, "#267b9d");
   }
 
   drawLives(ctx, x, y) {
@@ -9658,132 +9644,126 @@ class Game {
     this.outfitBackdrop = backdrop;
   }
 
+  // Modal typography has its own bounded layout; the HUD's minimum font
+  // scaling must not expand labels beyond their cards.
+  drawOutfitText(ctx, text, x, y, width, size = 14, weight = 500, color = "#364e5a", align = "left") {
+    ctx.save();
+    ctx.font = `${weight} ${size}px "PingFang SC", "Microsoft YaHei", Arial, sans-serif`;
+    let label = String(text);
+    if (ctx.measureText(label).width > width) {
+      while (label.length && ctx.measureText(label + "…").width > width) label = label.slice(0, -1);
+      label += "…";
+    }
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x, y);
+    ctx.restore();
+  }
+
   drawOutfitPanel(ctx) {
-    const x = 31;
-    const y = 158;
-    const w = 314;
-    const h = 496;
-    const leftW = 174;
-    const optionX = x + 186;
-    const optionViewportW = x + w - optionX - 8;
+    const w = CONFIG.logicalWidth - 32;
+    const h = Math.min(608, CONFIG.logicalHeight - 64);
+    const x = (CONFIG.logicalWidth - w) / 2;
+    const y = (CONFIG.logicalHeight - h) / 2;
+    const contentX = x + 14;
+    const contentY = y + 112;
+    const contentW = w - 28;
+    const bottom = y + h - 16;
     this.uiPanel.bounds = { x, y, w, h };
-    this.uiPanel.closeRect = { x: x + 9, y: y + 7, w: 40, h: 40 };
-    this.uiPanel.buttons = [{ id: "outfit-close", ...this.uiPanel.closeRect }];
+    this.uiPanel.closeRect = { x: x + 10, y: y + 10, w: 40, h: 40 };
+    this.uiPanel.buttons = [];
+    this.outfitRowScrollRects = [];
 
     ctx.save();
-    ctx.fillStyle = "rgba(37, 81, 99, 0.28)";
+    ctx.fillStyle = "rgba(30, 58, 70, 0.35)";
     ctx.fillRect(0, 0, CONFIG.logicalWidth, CONFIG.logicalHeight);
-
-    ctx.shadowColor = "rgba(63, 112, 132, 0.20)";
-    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(39, 70, 84, 0.20)";
+    ctx.shadowBlur = 22;
     ctx.shadowOffsetY = 8;
-    ctx.fillStyle = "rgba(250, 253, 254, 0.98)";
-    this.roundRect(ctx, x, y, w, h, 18);
+    ctx.fillStyle = "#f8fbfd";
+    this.roundRect(ctx, x, y, w, h, 22);
     ctx.fill();
     ctx.restore();
 
     ctx.save();
-    ctx.beginPath();
-    this.roundRect(ctx, x, y, leftW, h, 18);
+    this.roundRect(ctx, x, y, w, h, 22);
     ctx.clip();
-    ctx.fillStyle = "#f8dce5";
-    ctx.fillRect(x, y, leftW, h);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.42)";
-    [17, 49, 81, 113, 145].forEach((offset) => {
-      this.roundRect(ctx, x + offset, y, 11, h, 5.5);
-      ctx.fill();
-    });
-    ctx.restore();
-
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#5f6c72";
-    setCanvasFont(ctx, "bold 16px Arial, Helvetica, sans-serif");
-    ctx.fillText(this.outfitPanelTab === "holds" ? "岩点预览" : this.outfitPanelTab === "achievements" ? "成就墙" : "角色预览", x + 92, y + 27);
-    ctx.fillStyle = "#c9244d";
-    setCanvasFont(ctx, "900 12px Arial, Helvetica, sans-serif");
-    ctx.fillText(`限定碎片 ×${this.limitedSkinProgress.fragments}`, x + 92, y + 49);
-    ctx.restore();
-
-    this.drawOutfitShopBackButton(ctx, x + 9, y + 7);
-    this.drawOutfitShopPreview(ctx, x + leftW / 2, y + h / 2 + 28);
-    this.drawOutfitPanelTabs(ctx, x + 184, y + 13);
+    this.drawOutfitShopBackButton(ctx, x + 10, y + 10);
+    this.drawOutfitText(ctx, "换装与收藏", x + 58, y + 31, 124, 18, 600);
+    const chipW = 126;
+    ctx.fillStyle = "#e3f5fc";
+    this.roundRect(ctx, x + w - chipW - 14, y + 16, chipW, 30, 15);
+    ctx.fill();
+    this.drawLimitedFragmentSprite(ctx, x + w - chipW, y + 31, 22);
+    this.drawOutfitText(ctx, `限定碎片 ×${this.limitedSkinProgress.fragments}`, x + w - chipW / 2 - 6, y + 31, chipW - 30, 12, 600, "#267b9d", "center");
+    this.drawOutfitPanelTabs(ctx, contentX, y + 62, contentW);
 
     if (this.outfitPanelTab === "holds") {
-      this.drawOutfitHoldThemeOptions(ctx, x + 183, y + 58);
-      return;
+      this.drawOutfitHoldThemeOptions(ctx, contentX, contentY, contentW, bottom - contentY);
+    } else if (this.outfitPanelTab === "achievements") {
+      this.drawAchievementWall(ctx, contentX, contentY, contentX + contentW, bottom);
+    } else {
+      const previewW = 104;
+      ctx.save();
+      this.roundRect(ctx, contentX, contentY, previewW, bottom - contentY, 14);
+      ctx.clip();
+      ctx.fillStyle = "#f8e8ee";
+      ctx.fillRect(contentX, contentY, previewW, bottom - contentY);
+      ctx.fillStyle = "rgba(255,255,255,0.38)";
+      for (let stripe = 10; stripe < previewW; stripe += 24) ctx.fillRect(contentX + stripe, contentY, 8, bottom - contentY);
+      this.drawOutfitText(ctx, "角色预览", contentX + previewW / 2, contentY + 24, previewW - 12, 13, 500, "#866774", "center");
+      this.drawOutfitPreviewCharacter(ctx, contentX + previewW / 2, contentY + 230, true, 1.05);
+      this.drawOutfitText(ctx, "搭配即时保存", contentX + previewW / 2, bottom - 20, previewW - 12, 11, 400, "#866774", "center");
+      ctx.restore();
+      const optionX = contentX + previewW + 14;
+      const optionW = contentW - previewW - 14;
+      const sections = [
+        { part: "hair", label: "发型" },
+        { part: "shirt", label: "上装" },
+        { part: "pants", label: "下装" },
+        { part: "chalkBag", label: "镁粉袋" },
+        { part: "accessory", label: "配饰" }
+      ];
+      const rowH = (bottom - contentY) / sections.length;
+      sections.forEach((section, index) => {
+        this.drawOutfitShopSection(ctx, { ...section, y: contentY + index * rowH, options: OUTFIT_OPTIONS[section.part].map(option => option.id) }, optionX, optionW);
+      });
     }
-
-    if (this.outfitPanelTab === "achievements") {
-      this.drawAchievementWall(ctx, x + 178, y + 52, x + w - 10, y + h - 10);
-      return;
-    }
-
-    ctx.save();
-    ctx.strokeStyle = "rgba(141, 177, 190, 0.34)";
-    ctx.lineWidth = 1;
-    [132, 215, 298, 381].forEach((offset) => {
-      ctx.beginPath();
-      ctx.moveTo(x + 175, y + offset);
-      ctx.lineTo(x + w - 1, y + offset);
-      ctx.stroke();
-    });
     ctx.restore();
-
-    const sections = [
-      { part: "hair", label: "发型", y: y + 52, options: OUTFIT_OPTIONS.hair.map((option) => option.id) },
-      { part: "shirt", label: "上装", y: y + 135, options: OUTFIT_OPTIONS.shirt.map((option) => option.id) },
-      { part: "pants", label: "下装", y: y + 218, options: OUTFIT_OPTIONS.pants.map((option) => option.id) },
-      { part: "chalkBag", label: "镁粉袋", y: y + 301, options: OUTFIT_OPTIONS.chalkBag.map((option) => option.id) },
-      { part: "accessory", label: "配饰", y: y + 384, options: OUTFIT_OPTIONS.accessory.map((option) => option.id) }
-    ];
-
-    this.outfitRowScrollRects = [];
-    sections.forEach((section) => {
-      this.drawOutfitShopSection(ctx, section, optionX, optionViewportW);
-    });
   }
 
-  drawOutfitPanelTabs(ctx, x, y) {
-    const tabs = [
-      { id: "clothes", label: "服装" },
-      { id: "holds", label: "岩点" },
-      { id: "achievements", label: "成就" }
-    ];
-    const tabW = 58;
-    const tabH = 32;
+  drawOutfitPanelTabs(ctx, x, y, width) {
+    const tabs = [{ id: "clothes", label: "服装" }, { id: "holds", label: "岩点" }, { id: "achievements", label: "成就" }];
+    const gap = 6;
+    const tabW = (width - gap * 2) / 3;
+    const tabH = 36;
     tabs.forEach((tab, index) => {
-      const tabX = x + index * (tabW + 5);
+      const tabX = x + index * (tabW + gap);
       const selected = this.outfitPanelTab === tab.id;
       this.uiPanel.buttons.push({ id: `outfit-tab-${tab.id}`, x: tabX, y, w: tabW, h: tabH });
       ctx.save();
-      ctx.fillStyle = selected ? "#e5faff" : "#f1f5f6";
-      this.roundRect(ctx, tabX, y, tabW, tabH, 10);
+      ctx.fillStyle = selected ? "#dff4f8" : "#edf2f5";
+      this.roundRect(ctx, tabX, y, tabW, tabH, 11);
       ctx.fill();
-      ctx.strokeStyle = selected ? "#5bd8ee" : "rgba(91, 125, 138, 0.16)";
-      ctx.lineWidth = selected ? 2 : 1;
-      ctx.stroke();
-      ctx.fillStyle = selected ? "#167d93" : "#75858c";
-      setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(tab.label, tabX + tabW / 2, y + tabH / 2 + 1);
+      if (selected) {
+        ctx.strokeStyle = "#65becd";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      this.drawOutfitText(ctx, tab.label, tabX + tabW / 2, y + tabH / 2, tabW - 12, 15, selected ? 600 : 500, selected ? "#176f83" : "#607783", "center");
       ctx.restore();
     });
   }
 
-  drawOutfitHoldThemeOptions(ctx, x, y) {
-    const cardW = 58;
-    const cardH = 91;
-    const gapX = 7;
-    const gapY = 8;
+  drawOutfitHoldThemeOptions(ctx, x, y, width, height) {
+    this.drawOutfitText(ctx, "选择岩点风格", x, y + 10, width, 14, 500);
+    const gap = 10;
+    const cardW = (width - gap) / 2;
+    const rows = Math.ceil(HOLD_THEME_ASSET_SETS.length / 2);
+    const cardH = Math.min(102, (height - 32 - (rows - 1) * gap) / rows);
     HOLD_THEME_ASSET_SETS.forEach((theme, index) => {
-      const col = index % 2;
-      const row = Math.floor(index / 2);
-      const cardX = x + col * (cardW + gapX);
-      const cardY = y + row * (cardH + gapY);
-      this.drawOutfitHoldThemeCard(ctx, theme, cardX, cardY, cardW, cardH);
+      this.drawOutfitHoldThemeCard(ctx, theme, x + (index % 2) * (cardW + gap), y + 32 + Math.floor(index / 2) * (cardH + gap), cardW, cardH);
     });
   }
 
@@ -9795,156 +9775,78 @@ class Game {
     const redeemable = locked && this.canRedeemLimitedSkin(theme.id);
     this.uiPanel.buttons.push({ id: `outfit-hold-theme-${theme.id}`, x, y, w, h });
     ctx.save();
-    ctx.fillStyle = selected ? "rgba(229, 252, 255, 0.98)" : "rgba(244, 249, 251, 0.98)";
-    this.roundRect(ctx, x, y, w, h, 10);
+    ctx.fillStyle = selected ? "#e4f6f9" : locked ? "#f0f2f5" : "#ffffff";
+    this.roundRect(ctx, x, y, w, h, 12);
     ctx.fill();
-    ctx.strokeStyle = selected ? "#5bd8ee" : "rgba(91, 125, 138, 0.16)";
-    ctx.lineWidth = selected ? 2.5 : 1;
+    ctx.strokeStyle = selected ? "#65becd" : "#dae4e9";
+    ctx.lineWidth = selected ? 1.8 : 1;
     ctx.stroke();
-
+    ctx.save();
+    if (locked) ctx.globalAlpha = 0.55;
     this.drawHoldThemeSwatch(ctx, theme, x + w / 2, y + 29, 21);
-    ctx.fillStyle = selected ? "#167d93" : "#52636b";
-    setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(theme.label, x + w / 2, y + 61);
-    ctx.fillStyle = selected ? "#28a9c2" : "rgba(82, 99, 107, 0.58)";
-    setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
-    ctx.fillText(
-      locked ? (redeemable ? "可兑换" : `🔒 ${limitedItem.cost}碎片`) : loading ? "加载中..." : selected ? "使用中" : "点击切换",
-      x + w / 2,
-      y + 78
-    );
-    if (locked) {
-      ctx.fillStyle = "rgba(45, 52, 57, 0.58)";
-      this.roundRect(ctx, x, y, w, h, 10);
-      ctx.fill();
-      if (redeemable) {
-        ctx.strokeStyle = "#ffcf45";
-        ctx.lineWidth = 2.5;
-        this.roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 9);
-        ctx.stroke();
-      }
-      ctx.fillStyle = redeemable ? "#ffe06b" : "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      setCanvasFont(ctx, "900 10px Arial, Helvetica, sans-serif");
-      ctx.fillText(redeemable ? "可兑换" : `🔒 ${limitedItem.cost}碎片`, x + w / 2, y + 78);
-    }
+    ctx.restore();
+    this.drawOutfitText(ctx, theme.label, x + w / 2, y + h - 34, w - 16, 14, selected ? 600 : 500, selected ? "#176f83" : "#364e5a", "center");
+    const status = locked ? (redeemable ? "可兑换" : `${limitedItem.cost} 碎片解锁`) : loading ? "加载中…" : selected ? "已使用" : "点击切换";
+    this.drawOutfitText(ctx, status, x + w / 2, y + h - 15, w - 16, 12, 400, locked ? "#9a6837" : selected ? "#176f83" : "#687e89", "center");
     ctx.restore();
   }
 
   drawAchievementWall(ctx, left, top, right, bottom) {
-    const cols = 6;
-    const cardW = 64;
-    const cardH = 78;
-    const gapX = 8;
-    const gapY = 8;
-    const startX = left + 4;
-    const startY = top + 4;
-    const unlockedCount = this.getUnlockedCount();
-
-    // Find the next locked achievement (lowest height not yet unlocked)
-    let nextLocked = null;
-    for (const ach of ACHIEVEMENT_CONFIG) {
-      if (!this.isAchievementUnlocked(ach.id)) { nextLocked = ach; break; }
-    }
-
-    ctx.save();
-    ctx.fillStyle = "rgba(250,252,254,0.6)";
-    setCanvasFont(ctx, "12px Arial, Helvetica, sans-serif");
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(`已解锁 ${unlockedCount} / ${ACHIEVEMENT_CONFIG.length}`, startX, startY);
-    if (nextLocked) {
-      ctx.fillStyle = "#c77c3b";
-      setCanvasFont(ctx, "bold 11px Arial, Helvetica, sans-serif");
-      const nextH = nextLocked.height >= 1000 ? (nextLocked.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : nextLocked.height + 'm';
-      ctx.fillText(`下一个: ${nextH} ${nextLocked.name}`, startX, startY + 16);
-    }
-    const headerY = startY + (nextLocked ? 32 : 18);
-
-    ACHIEVEMENT_CONFIG.forEach((ach, index) => {
-      const col = index % cols;
-      const row = Math.floor(index / cols);
-      const cardX = startX + col * (cardW + gapX);
-      const cardY = headerY + row * (cardH + gapY);
+    const width = right - left;
+    const cols = 3;
+    const pageSize = 9;
+    const pageCount = Math.ceil(ACHIEVEMENT_CONFIG.length / pageSize);
+    this.outfitAchievementPage = clamp(this.outfitAchievementPage || 0, 0, pageCount - 1);
+    const page = this.outfitAchievementPage;
+    const nextLocked = ACHIEVEMENT_CONFIG.find(ach => !this.isAchievementUnlocked(ach.id));
+    const formatHeight = height => `${height}m`;
+    this.drawOutfitText(ctx, `已解锁 ${this.getUnlockedCount()} / ${ACHIEVEMENT_CONFIG.length}`, left, top + 10, width, 15, 600);
+    this.drawOutfitText(ctx, nextLocked ? `下一枚 · ${formatHeight(nextLocked.height)} ${nextLocked.name}` : "全部成就已解锁", left, top + 34, width, 13, 400, "#99642d");
+    const gap = 10;
+    const cardW = (width - gap * (cols - 1)) / cols;
+    const gridY = top + 58;
+    const cardH = Math.min(118, (bottom - 48 - gridY - gap * 2) / 3);
+    ACHIEVEMENT_CONFIG.slice(page * pageSize, (page + 1) * pageSize).forEach((ach, index) => {
+      const cardX = left + (index % cols) * (cardW + gap);
+      const cardY = gridY + Math.floor(index / cols) * (cardH + gap);
       const unlocked = this.isAchievementUnlocked(ach.id);
       const isNext = nextLocked && nextLocked.id === ach.id;
-
       ctx.save();
-      if (unlocked) {
-        ctx.fillStyle = "rgba(255,250,240,0.95)";
-        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(218,165,32,0.45)";
-        ctx.lineWidth = 1.2;
-        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = "rgba(242,244,246,0.95)";
-        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
-        ctx.fill();
-        ctx.strokeStyle = "rgba(190,196,200,0.35)";
-        ctx.lineWidth = 1;
-        this.roundRect(ctx, cardX, cardY, cardW, cardH, 10);
-        ctx.stroke();
-      }
-
-      const badgeSize = 46;
+      ctx.fillStyle = unlocked ? "#fff8e9" : "#f0f3f6";
+      this.roundRect(ctx, cardX, cardY, cardW, cardH, 12);
+      ctx.fill();
+      ctx.strokeStyle = unlocked || isNext ? "#d9b97f" : "#dce4ea";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      const badgeSize = Math.min(62, cardW - 18, cardH - 44);
       const badgeX = cardX + (cardW - badgeSize) / 2;
-      const badgeY = cardY + 5;
-      const badgeAsset = this.achievementAssets[ach.badge];
-
-      if (unlocked && badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
-        ctx.globalAlpha = 1;
-        ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
-      } else if (badgeAsset && badgeAsset.loaded && badgeAsset.image.complete) {
-        // Locked: grayscale the entire badge image
-        ctx.globalAlpha = 1;
+      const badgeY = cardY + 8;
+      const asset = this.achievementAssets[ach.badge];
+      if (asset && asset.loaded && asset.image.complete) {
         ctx.save();
-        ctx.beginPath();
-        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 6);
-        ctx.clip();
-        ctx.filter = "grayscale(1) brightness(1.15)";
-        ctx.drawImage(badgeAsset.image, badgeX, badgeY, badgeSize, badgeSize);
-        ctx.filter = "none";
+        if (!unlocked) ctx.filter = "grayscale(1) opacity(0.65)";
+        ctx.drawImage(asset.image, badgeX, badgeY, badgeSize, badgeSize);
         ctx.restore();
-        // Add a subtle lock overlay
-        ctx.fillStyle = "rgba(0,0,0,0.12)";
-        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 6);
-        ctx.fill();
-      } else {
-        ctx.fillStyle = unlocked ? "#e8d4a8" : "#d8dce0";
-        this.roundRect(ctx, badgeX, badgeY, badgeSize, badgeSize, 8);
-        ctx.fill();
       }
-
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
       if (unlocked) {
-        ctx.fillStyle = "#333";
-        setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
-        const displayName = ach.name.length > 5 ? ach.name.slice(0, 4) + ".." : ach.name;
-        ctx.fillText(displayName, cardX + cardW / 2, cardY + badgeSize + 13);
-
-        ctx.fillStyle = "#888";
-        setCanvasFont(ctx, "9px Arial, Helvetica, sans-serif");
-        const hText = ach.height >= 1000 ? (ach.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : ach.height + 'm';
-        ctx.fillText(hText, cardX + cardW / 2, cardY + badgeSize + 26);
+        this.drawOutfitText(ctx, ach.name, cardX + cardW / 2, cardY + cardH - 29, cardW - 10, 12, 500, "#5d4e37", "center");
+        this.drawOutfitText(ctx, formatHeight(ach.height), cardX + cardW / 2, cardY + cardH - 12, cardW - 10, 11, 400, "#79684e", "center");
       } else if (isNext) {
-        // Next-to-unlock: show height hint in orange
-        ctx.fillStyle = "#e87d2b";
-        setCanvasFont(ctx, "bold 9px Arial, Helvetica, sans-serif");
-        const hText = ach.height >= 1000 ? (ach.height / 1000).toFixed(1).replace(/\.0$/, '') + 'km' : ach.height + 'm';
-        ctx.fillText(hText, cardX + cardW / 2, cardY + badgeSize + 14);
+        this.drawOutfitText(ctx, formatHeight(ach.height), cardX + cardW / 2, cardY + cardH - 24, cardW - 10, 13, 600, "#99642d", "center");
       }
-      // Other locked badges: no text at all (purely gray silhouette)
-
       ctx.restore();
     });
-
-    ctx.restore();
+    const buttonY = bottom - 34;
+    [{ id: "prev", label: "上一页", x: left, enabled: page > 0 }, { id: "next", label: "下一页", x: right - 86, enabled: page < pageCount - 1 }].forEach(button => {
+      ctx.save();
+      ctx.fillStyle = button.enabled ? "#e4f2f6" : "#edf1f4";
+      this.roundRect(ctx, button.x, buttonY, 86, 34, 10);
+      ctx.fill();
+      this.drawOutfitText(ctx, button.label, button.x + 43, buttonY + 17, 70, 13, 500, button.enabled ? "#176f83" : "#8c9da6", "center");
+      if (button.enabled) this.uiPanel.buttons.push({ id: `outfit-achievements-${button.id}`, x: button.x, y: buttonY, w: 86, h: 34 });
+      ctx.restore();
+    });
+    this.drawOutfitText(ctx, `${page + 1} / ${pageCount}`, (left + right) / 2, buttonY + 17, width - 188, 13, 400, "#607783", "center");
   }
 
   drawHoldThemeSwatch(ctx, theme, cx, cy, radius) {
@@ -10014,19 +9916,8 @@ class Game {
     const scrollOffset = this.outfitRowScroll[section.part];
     this.outfitRowScrollRects.push({ part: section.part, x, y: cardY, w: viewportW, h: cardSize, maxScroll });
 
-    ctx.save();
-    ctx.fillStyle = "#52636b";
-    setCanvasFont(ctx, "bold 13px Arial, Helvetica, sans-serif");
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    ctx.fillText(section.label, x, section.y + 7);
-    if (maxScroll > 0) {
-      ctx.fillStyle = "rgba(82, 99, 107, 0.48)";
-      setCanvasFont(ctx, "bold 10px Arial, Helvetica, sans-serif");
-      ctx.textAlign = "right";
-      ctx.fillText("左右滑动", x + viewportW, section.y + 7);
-    }
-    ctx.restore();
+    this.drawOutfitText(ctx, section.label, x, section.y + 7, viewportW - 66, 14, 500);
+    if (maxScroll > 0) this.drawOutfitText(ctx, "左右滑动", x + viewportW, section.y + 7, 60, 11, 400, "#687e89", "right");
 
     ctx.save();
     ctx.beginPath();
@@ -10040,7 +9931,7 @@ class Game {
     ctx.restore();
 
     if (maxScroll > 0) {
-      const trackY = cardY + cardSize - 2;
+      const trackY = cardY + cardSize + 6;
       const thumbW = Math.max(20, viewportW * (viewportW / contentW));
       const thumbX = x + (viewportW - thumbW) * (scrollOffset / maxScroll);
       ctx.save();
@@ -10073,14 +9964,13 @@ class Game {
     ctx.stroke();
     this.drawOutfitOptionPreview(ctx, optionId, x + size / 2, y + size / 2);
     if (locked) {
-      ctx.fillStyle = "rgba(48, 54, 58, 0.62)";
+      ctx.fillStyle = "rgba(239, 242, 245, 0.55)";
       this.roundRect(ctx, x, y, size, size, 8);
       ctx.fill();
-      ctx.fillStyle = redeemable ? "#ffe06b" : "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      setCanvasFont(ctx, "900 10px Arial, Helvetica, sans-serif");
-      ctx.fillText(redeemable ? "可兑换" : `🔒 ${limitedItem.cost}`, x + size / 2, y + size - 10);
+      ctx.fillStyle = "#fbf0de";
+      this.roundRect(ctx, x + 3, y + size - 19, size - 6, 16, 5);
+      ctx.fill();
+      this.drawOutfitText(ctx, redeemable ? "可兑换" : `${limitedItem.cost} 碎片`, x + size / 2, y + size - 11, size - 10, 10, 500, "#91602e", "center");
     }
     ctx.restore();
   }
